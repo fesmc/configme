@@ -1,0 +1,3 @@
+- Repository to support compilation of yelmox related libraries.
+- API need to be robust and failsafe, with clear and extensible methods.
+- Include good comments and readme notes.
