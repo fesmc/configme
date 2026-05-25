@@ -20,8 +20,13 @@ default_packages = [
     "rembo1",
 ]
 
-# Typed post-config extras (see docs/DESIGN.md sec. 12).
-extras = ["runme_config", "data_link"]
+# Typed post-config extras (see docs/DESIGN.md sec. 12). Each is a built-in
+# handler; user/machine-specific values (hpc/account, data paths) are read from
+# .configme/config.toml or prompted — never shipped, never arbitrary shell.
+[orchestrator.extras]
+pip_package = ["runme"]       # install the `runme` command if missing
+runme_config = true           # create/patch .runme_config (hpc/account)
+data_link = ["ice_data", "isostasy_data"]   # link runtime data dirs
 
 # Components are cloned as sub-packages directly under the orchestrator dir
 # (yelmox/yelmo, yelmox/fesm-utils, ...), so the orchestrator references them

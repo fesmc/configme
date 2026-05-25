@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from configme import context, data, generate, netcdf
+from configme import context, data, extras as extras_mod, generate, netcdf
 
 
 class InstallError(Exception):
@@ -177,7 +177,7 @@ def _dest_of(node: Node, plan: Plan, root: Path) -> Path:
 def run_install(target: str, *, download: str, install_dir: Optional[str],
                 machine: Optional[str], compiler: Optional[str],
                 overwrite: bool, build_deps: bool, dry_run: bool,
-                prompt_fn) -> int:
+                prompt_fn, ask_fn=None) -> int:
     cwd = Path.cwd()
     plan = build_plan(target)                      # fail-fast: unknown names
     root, primary_present = _root_for(plan, install_dir, cwd)
@@ -302,6 +302,13 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         except (generate.GenerateError, netcdf.NetcdfError) as e:
             print(f"  ! {node.name}: {e}")
             results["failed"].append(node.name)
+
+    # --- extras (orchestrator post-config steps)
+    if plan.orchestrator is not None and plan.orchestrator.extras:
+        proj = context.find_project(root) if root.exists() else None
+        cfg = context.load_config(proj) if proj else {}
+        ask = ask_fn or (lambda label: None)
+        extras_mod.run_extras(plan.orchestrator, runner, root, cfg, ask)
 
     # --- reproducibility log
     install_sh = root / ".install.sh"

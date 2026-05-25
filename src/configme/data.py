@@ -105,7 +105,7 @@ class Orchestrator:
     dir: str
     config_style: str
     default_packages: List[str] = field(default_factory=list)
-    extras: List[str] = field(default_factory=list)
+    extras: dict = field(default_factory=dict)
     links: List[Link] = field(default_factory=list)
 
     @classmethod
@@ -123,7 +123,7 @@ class Orchestrator:
                 dir=orch.get("dir", orch["name"]),
                 config_style=orch.get("config_style", "makefile-template"),
                 default_packages=list(orch.get("default_packages", [])),
-                extras=list(orch.get("extras", [])),
+                extras=dict(orch.get("extras", {})),
                 links=links,
             )
         except KeyError as e:

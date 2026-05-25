@@ -85,6 +85,15 @@ def _prompt_choice(label: str, options) -> str:
             return ans
 
 
+def _ask(label: str) -> "str | None":
+    """Free-text prompt for extras values; returns None when non-interactive
+    (so extras degrade to 'pending' rather than blocking)."""
+    if not sys.stdin.isatty():
+        return None
+    ans = input(f"  {label}: ").strip()
+    return ans or None
+
+
 def _nudge(kind: str, name: str, tier: str) -> None:
     """Advisory-only: suggest contributing a fragment that is defined locally
     but absent from the shipped registry. No network/gh coupling."""
@@ -286,6 +295,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         build_deps=args.build_deps,
         dry_run=args.dry_run,
         prompt_fn=_prompt_choice,
+        ask_fn=_ask,
     )
 
 
