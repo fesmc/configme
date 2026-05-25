@@ -1,6 +1,5 @@
 # Machine configuration: linux (intended compiler: gfortran).
-# NetCDF roots come from the environment; set NC_CROOT and NC_FROOT in .bashrc.
-
-INC_NC = -I${NC_FROOT}/include
-LIB_NC = -L${NC_FROOT}/lib -lnetcdff -L${NC_CROOT}/lib -lnetcdf
-
+#
+# Generic Linux. netCDF is auto-detected by configme (nf-config/nc-config) —
+# no NC_FROOT / NC_CROOT in .bashrc required. To pin it, assign INC_NC / LIB_NC
+# here and configme will use those as an override.

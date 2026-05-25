@@ -1,4 +1,5 @@
 # Machine configuration: anta (intended compiler: gfortran).
-# System netCDF under /usr.
-INC_NC = -I/usr/include
-LIB_NC = -L/usr/lib -lnetcdff -Wl,-Bsymbolic-functions -Wl,-z,relro -Wl,-z,now -lnetcdf -lnetcdf -ldl -lz -lcurl -lm
+#
+# netCDF is auto-detected by configme. No machine-specific build overrides.
+# To pin netCDF instead, assign INC_NC / LIB_NC here (configme treats any such
+# assignment as an override and skips detection).
