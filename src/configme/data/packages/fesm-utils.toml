@@ -1,0 +1,15 @@
+# fesm-utils: shared utility libraries (LIS + FFTW + utils).
+#
+# Structural outlier: no config/Makefile template. Its "configuration" is an
+# autotools build driven by its own build.py + machines/*.toml registry, so
+# configme treats it as a build.py-style package (see docs/DESIGN.md sec. 8).
+
+[package]
+name = "fesm-utils"
+org = "fesmc"
+repo = "fesm-utils"
+dir = "fesm-utils"
+config_style = "build.py"
+# config.py / config/ for the utils component live in the utils/ subdirectory,
+# not at the repo root.
+config_subdir = "utils"

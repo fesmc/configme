@@ -1,2 +1,10 @@
 .claude/worktrees
 
+# Python build/install artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+

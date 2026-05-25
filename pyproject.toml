@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "configme"
+version = "0.1.0"
+description = "Configure the build of the yelmox / climber-x model stacks from one source of machine- and compiler-specific truth."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Alexander Robinson" },
+]
+# Stdlib-only at runtime. tomllib is stdlib on 3.11+; on older Pythons we fall
+# back to the `tomli` backport (declared as a conditional dependency).
+dependencies = [
+    "tomli; python_version < '3.11'",
+]
+
+[project.scripts]
+configme = "configme.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+configme = [
+    "data/packages/*.toml",
+    "data/orchestrators/*.toml",
+    "data/machines/*.mk",
+    "data/compilers/*.mk",
+]

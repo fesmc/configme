@@ -1,0 +1,13 @@
+# rembo1: regional energy-moisture balance atmosphere model.
+
+[package]
+name = "rembo1"
+org = "alex-robinson"
+repo = "rembo1"
+dir = "rembo1"
+config_style = "makefile-template"
+
+# rembo1 links coordinates into its libs/ subdirectory (not the repo root).
+[[package.links]]
+dep = "coordinates"
+path = "libs/coordinates"

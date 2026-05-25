@@ -1,0 +1,13 @@
+# yelmo: the ice-sheet model.
+
+[package]
+name = "yelmo"
+org = "fesmc"
+repo = "yelmo"
+dir = "yelmo"
+config_style = "makefile-template"
+
+# Build links created inside this package's directory. `path` defaults to the
+# dep name at the package root, so this links yelmo/fesm-utils -> fesm-utils.
+[[package.links]]
+dep = "fesm-utils"

@@ -1,0 +1,16 @@
+# climber-x orchestrator (cxesmc/climber-x).
+#
+# Placeholder seed. climber-x compiles a different set of components than
+# yelmox; its package data, component migration, and declared extras are filled
+# in when climber-x is onboarded (see docs/DESIGN.md sec. 13 and issue #10).
+# Listed here so `configme list` surfaces it as a known orchestrator.
+
+[orchestrator]
+name = "climber-x"
+org = "cxesmc"
+repo = "climber-x"
+dir = "climber-x"
+config_style = "makefile-template"
+
+default_packages = []
+extras = []

@@ -1,0 +1,11 @@
+# FastIsostasy: glacial isostatic adjustment / solid-earth model.
+
+[package]
+name = "FastIsostasy"
+org = "palma-ice"
+repo = "FastIsostasy"
+dir = "FastIsostasy"
+config_style = "makefile-template"
+
+[[package.links]]
+dep = "fesm-utils"

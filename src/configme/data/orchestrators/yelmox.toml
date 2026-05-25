@@ -1,0 +1,36 @@
+# yelmox orchestrator: couples yelmo + FastIsostasy (+ optional rembo1) and is
+# itself a buildable package with its own config/Makefile template.
+#
+# This is the shipped seed manifest. A cloned yelmox carrying its own
+# .configme/manifest.toml takes precedence (see docs/DESIGN.md sec. 3).
+
+[orchestrator]
+name = "yelmox"
+org = "fesmc"
+repo = "yelmox"
+dir = "yelmox"
+config_style = "makefile-template"
+
+# The full default set installed by `configme install yelmox`, in build order.
+default_packages = [
+    "fesm-utils",
+    "coordinates",
+    "yelmo",
+    "FastIsostasy",
+    "rembo1",
+]
+
+# Typed post-config extras (see docs/DESIGN.md sec. 12).
+extras = ["runme_config", "data_link"]
+
+# Root-level links yelmox creates to its components for the parent Makefile.
+[[orchestrator.links]]
+dep = "fesm-utils"
+[[orchestrator.links]]
+dep = "yelmo"
+[[orchestrator.links]]
+dep = "FastIsostasy"
+[[orchestrator.links]]
+dep = "coordinates"
+[[orchestrator.links]]
+dep = "rembo1"

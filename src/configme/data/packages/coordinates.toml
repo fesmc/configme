@@ -1,0 +1,8 @@
+# coordinates: grid/coordinate library (build dependency of rembo1).
+
+[package]
+name = "coordinates"
+org = "fesmc"
+repo = "coordinates"
+dir = "coordinates"
+config_style = "makefile-template"
