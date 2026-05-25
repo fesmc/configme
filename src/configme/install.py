@@ -287,18 +287,22 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             print(f"  - {node.name}: not present; skipping configure")
             results["skipped"].append(node.name)
             continue
-        if (generate.find_repo_file(cfgroot, "common.mk") is None
-                and not node.is_orchestrator):
-            print(f"  - {node.name}: no common.mk (not migrated); skipping "
-                  f"configure (legacy fallback #9)")
-            results["skipped"].append(node.name)
-            continue
         try:
-            out = generate.generate_makefile(dest, machine, compiler,
-                                             machine_path, compiler_path,
-                                             node.config_subdir)
-            print(f"  + configure {node.name}: {out}")
-            results["configured"].append(node.name)
+            if generate.has_common(cfgroot) or node.is_orchestrator:
+                out = generate.generate_makefile(dest, machine, compiler,
+                                                 machine_path, compiler_path,
+                                                 node.config_subdir)
+                print(f"  + configure {node.name}: {out}")
+                results["configured"].append(node.name)
+            elif generate.legacy_flat_config(cfgroot, machine, compiler):
+                out = generate.legacy_makefile(dest, machine, compiler,
+                                               node.config_subdir)
+                print(f"  + configure {node.name}: {out} (LEGACY flat config)")
+                results["configured"].append(node.name)
+            else:
+                print(f"  - {node.name}: no common.mk and no legacy config "
+                      f"'{machine}_{compiler}'; skipping")
+                results["skipped"].append(node.name)
         except (generate.GenerateError, netcdf.NetcdfError) as e:
             print(f"  ! {node.name}: {e}")
             results["failed"].append(node.name)

@@ -176,15 +176,18 @@ def cmd_config(targets, machine, compiler) -> int:
                   f"(use `configme install --build-deps`); skipping")
             continue
         cfgroot = root / subdir if subdir else root
-        if generate.find_repo_file(cfgroot, "common.mk") is None and name != project_orch_name(project):
-            # makefile-template package not yet migrated to a common.mk.
-            print(f"  - {name}: no common.mk found (not migrated yet); skipping "
-                  f"(legacy fallback tracked in #9)")
-            continue
-        out = generate.generate_makefile(root, machine, compiler,
-                                         machine_path, compiler_path, subdir)
-        print(f"  + {name}: wrote {out}")
-        n_ok += 1
+        if generate.has_common(cfgroot) or name == project_orch_name(project):
+            out = generate.generate_makefile(root, machine, compiler,
+                                             machine_path, compiler_path, subdir)
+            print(f"  + {name}: wrote {out}")
+            n_ok += 1
+        elif generate.legacy_flat_config(cfgroot, machine, compiler) is not None:
+            out = generate.legacy_makefile(root, machine, compiler, subdir)
+            print(f"  + {name}: wrote {out} (LEGACY flat config — migrate to common.mk)")
+            n_ok += 1
+        else:
+            print(f"  - {name}: no common.mk and no legacy config "
+                  f"'{machine}_{compiler}'; skipping")
     print(f"Done: {n_ok} Makefile(s) generated.")
     return 0
 
