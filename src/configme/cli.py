@@ -8,9 +8,8 @@ Command surface (see docs/DESIGN.md sec. 4)::
     configme init                          scaffold/validate a .configme/ folder
     configme list                          supported packages / machines / compilers
 
-Only `list` is implemented in this first slice (issue #1). The other verbs are
-present so the surface and help are stable, but exit with a clear pointer to the
-issue that implements them.
+`list`, `netcdf`, `init`, and the config-only form are implemented. `install`
+is still stubbed with a pointer to its tracking issue.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from configme import __version__, data, generate, netcdf
+from configme import __version__, context, data, generate, netcdf
 
 # Verbs handled by subparsers. Anything else in first position is treated as a
 # config-only package target (the `configme [pkgs...]` form).
@@ -75,8 +74,8 @@ def cmd_list(args: argparse.Namespace) -> int:
 def _prompt_choice(label: str, options) -> str:
     """Prompt for a value, showing available options. TTY only."""
     if not sys.stdin.isatty():
-        raise generate.GenerateError(
-            f"no {label} given; pass --{label[:7]} "
+        raise context.ProjectError(
+            f"no {label} given; pass --{label[:1]} / --{label} "
             f"(available: {', '.join(options) or 'none'})"
         )
     print(f"Available {label}s: {', '.join(options) or '(none)'}")
@@ -86,68 +85,103 @@ def _prompt_choice(label: str, options) -> str:
             return ans
 
 
-def _resolve_selection(machine, compiler):
-    """Resolve machine + compiler from flags, prompting on a TTY otherwise.
-
-    (The richer precedence — orchestrator/user config, hostname detection —
-    arrives with the .configme contract in issue #5.)"""
-    if not machine:
-        machine = _prompt_choice("machine", data.machines())
-    if not compiler:
-        compiler = _prompt_choice("compiler", data.compilers())
-    return machine, compiler
+def _nudge(kind: str, name: str, tier: str) -> None:
+    """Advisory-only: suggest contributing a fragment that is defined locally
+    but absent from the shipped registry. No network/gh coupling."""
+    if tier != "shipped" and context.is_locally_defined_only(kind, name):
+        print(f"  note: {kind} '{name}' is defined locally ({tier} tier) but is "
+              f"not in the central configme registry.")
+        print(f"        Consider contributing it: "
+              f"https://github.com/fesmc/configme (PR or issue).")
 
 
-def _resolve_target_root(name: str, cwd: Path):
-    """Map a target name to (root_path, config_subdir).
+def _config_targets(targets, project, cwd):
+    """Resolve the list of (name, root, config_subdir, config_style) to build.
 
-    The root is the target's directory if it sits under cwd, or cwd itself when
-    cwd already *is* that directory (so configme works both from a parent and
-    from inside the repo)."""
+    With explicit targets, resolve each against cwd/project. With none, expand
+    the orchestrator: its own Makefile plus every manifest package present."""
     orchestrators = data.orchestrators()
     packages = data.packages()
-    if name in orchestrators:
-        dirname, subdir = orchestrators[name].dir, ""
-    elif name in packages:
-        dirname, subdir = packages[name].dir, packages[name].config_subdir
-    else:
-        known = sorted(set(orchestrators) | set(packages))
-        raise generate.GenerateError(
-            f"unknown target '{name}'. Supported: {', '.join(known)}"
-        )
-    if (cwd / dirname).is_dir():
-        return cwd / dirname, subdir
-    if cwd.name == dirname:
-        return cwd, subdir
-    raise generate.GenerateError(
-        f"could not find '{name}' at {cwd / dirname} or as the current directory. "
-        f"Run from its parent directory or from inside it."
-    )
+
+    def resolve_one(name):
+        if name in orchestrators:
+            dirname, subdir, style = orchestrators[name].dir, "", orchestrators[name].config_style
+        elif name in packages:
+            p = packages[name]
+            dirname, subdir, style = p.dir, p.config_subdir, p.config_style
+        else:
+            known = sorted(set(orchestrators) | set(packages))
+            raise context.ProjectError(
+                f"unknown target '{name}'. Supported: {', '.join(known)}")
+        # Prefer the project root when set; else cwd-relative or cwd itself.
+        base = project.root if project is not None else cwd
+        if (base / dirname).is_dir():
+            return name, base / dirname, subdir, style
+        if base.name == dirname:
+            return name, base, subdir, style
+        raise context.ProjectError(
+            f"could not find '{name}' at {base / dirname} or as the current "
+            f"directory. Clone it (configme install) or run from the right place.")
+
+    if targets:
+        return [resolve_one(n) for n in targets]
+
+    if project is None:
+        raise context.ProjectError(
+            "not inside a known orchestrator; name a target (e.g. `configme "
+            "yelmox`), run `configme init`, or cd into one of: "
+            f"{', '.join(sorted(o.dir for o in orchestrators.values()))}")
+
+    # Bare form: the orchestrator's own Makefile + each manifest package present.
+    items = [(project.orchestrator.name, project.root, "",
+              project.orchestrator.config_style)]
+    for name in context.manifest_packages(project):
+        p = packages[name]
+        root = project.root / p.dir
+        if not root.exists():
+            print(f"  - {name}: not present under {project.root} "
+                  f"(clone via `configme install`); skipping")
+            continue
+        items.append((name, root, p.config_subdir, p.config_style))
+    return items
 
 
 def cmd_config(targets, machine, compiler) -> int:
     cwd = Path.cwd()
+    project = context.find_project(cwd)
 
-    # With no explicit target, configure the orchestrator at the current dir.
-    # (Iterating the full manifest of packages is issue #5.)
-    if not targets:
-        orchestrators = data.orchestrators()
-        match = next((o for o in orchestrators.values() if o.dir == cwd.name), None)
-        if match is None:
-            raise generate.GenerateError(
-                "not inside a known orchestrator; name a target "
-                f"(e.g. `configme yelmox`) or run from one of: "
-                f"{', '.join(sorted(o.dir for o in orchestrators.values()))}"
-            )
-        targets = [match.name]
+    items = _config_targets(targets, project, cwd)
+    machine, compiler = context.resolve_selection(machine, compiler, project,
+                                                  prompt_fn=_prompt_choice)
 
-    machine, compiler = _resolve_selection(machine, compiler)
+    machine_path, machine_tier = context.resolve_fragment("machine", machine, project)
+    compiler_path, compiler_tier = context.resolve_fragment("compiler", compiler, project)
+    _nudge("machine", machine, machine_tier)
+    _nudge("compiler", compiler, compiler_tier)
 
-    for name in targets:
-        root, subdir = _resolve_target_root(name, cwd)
-        out = generate.generate_makefile(root, machine, compiler, subdir)
-        print(f"  + {name}: wrote {out}  (machine={machine}, compiler={compiler})")
+    print(f"Configuring (machine={machine}, compiler={compiler}):")
+    n_ok = 0
+    for name, root, subdir, style in items:
+        if style == "build.py":
+            print(f"  - {name}: build.py-style package; not a Makefile target "
+                  f"(use `configme install --build-deps`); skipping")
+            continue
+        cfgroot = root / subdir if subdir else root
+        if generate.find_repo_file(cfgroot, "common.mk") is None and name != project_orch_name(project):
+            # makefile-template package not yet migrated to a common.mk.
+            print(f"  - {name}: no common.mk found (not migrated yet); skipping "
+                  f"(legacy fallback tracked in #9)")
+            continue
+        out = generate.generate_makefile(root, machine, compiler,
+                                         machine_path, compiler_path, subdir)
+        print(f"  + {name}: wrote {out}")
+        n_ok += 1
+    print(f"Done: {n_ok} Makefile(s) generated.")
     return 0
+
+
+def project_orch_name(project):
+    return project.orchestrator.name if project is not None else None
 
 
 def cmd_netcdf(args: argparse.Namespace) -> int:
@@ -163,8 +197,82 @@ def cmd_netcdf(args: argparse.Namespace) -> int:
     return 0
 
 
+def _render_manifest(orch_name, packages_list, generic: bool) -> str:
+    pkgs = "".join(f'    "{p}",\n' for p in packages_list)
+    if generic:
+        supported = ", ".join(sorted(data.orchestrators()))
+        return (
+            "# configme manifest. Set the orchestrator and prune the package list.\n"
+            f"# Supported orchestrators: {supported}\n"
+            '# orchestrator = "yelmox"\n'
+            "packages = [\n" + pkgs + "]\n"
+        )
+    return (
+        f"# configme manifest for {orch_name}.\n"
+        f'orchestrator = "{orch_name}"\n'
+        "packages = [\n" + pkgs + "]\n"
+    )
+
+
 def cmd_init(args: argparse.Namespace) -> int:
-    _pending("`configme init` scaffolding", issue=5)
+    cwd = Path.cwd()
+    orchestrators = data.orchestrators()
+    packages = data.packages()
+    orch = next((o for o in orchestrators.values() if o.dir == cwd.name), None)
+
+    configme_dir = cwd / ".configme"
+    configme_dir.mkdir(exist_ok=True)
+    print(f"configme init in {cwd}")
+    if orch is not None:
+        print(f"  recognised orchestrator: {orch.name}")
+    else:
+        print("  not a recognised orchestrator directory — writing a generic "
+              "template (set `orchestrator` in manifest.toml).")
+
+    # --- manifest.toml: create if missing, else validate.
+    mf = configme_dir / "manifest.toml"
+    if not mf.is_file():
+        if orch is not None:
+            mf.write_text(_render_manifest(orch.name, orch.default_packages, False))
+        else:
+            mf.write_text(_render_manifest(None, sorted(packages), True))
+        print(f"  + wrote {mf}")
+    else:
+        print(f"  - {mf} exists; validating")
+        try:
+            project = context.find_project(cwd)
+            names = context.manifest_packages(project) if project else []
+            print(f"      ok: {len(names)} supported package(s) listed")
+        except context.ProjectError as e:
+            print(f"      ! {e}")
+
+    # --- config.toml: create a commented template if missing, else validate.
+    cf = configme_dir / "config.toml"
+    if not cf.is_file():
+        cf.write_text(
+            "# configme local settings — uncomment and set for this checkout.\n"
+            "# machine and compiler are otherwise resolved from flags, the user\n"
+            "# config (~/.configme/config.toml), hostname detection, or a prompt.\n"
+            f"# Available machines:  {', '.join(data.machines())}\n"
+            f"# Available compilers: {', '.join(data.compilers())}\n"
+            '# machine = "macbook"\n'
+            '# compiler = "gfortran"\n'
+        )
+        print(f"  + wrote {cf}")
+    else:
+        print(f"  - {cf} exists; validating")
+        project = context.find_project(cwd)
+        cfg = context.load_config(project) if project else {}
+        for key, kind in (("machine", "machine"), ("compiler", "compiler")):
+            val = cfg.get(key)
+            if val and val not in context.available_fragments(kind, project):
+                print(f"      ! {key} '{val}' has no fragment in any tier "
+                      f"(available: {', '.join(context.available_fragments(kind, project))})")
+            elif val:
+                print(f"      ok: {key} = {val}")
+
+    print("Done.")
+    return 0
 
 
 def cmd_install(args: argparse.Namespace) -> int:
@@ -241,7 +349,8 @@ def main(argv=None) -> int:
     except NotImplementedYet as e:
         _report_pending(e)
         return 2
-    except (data.DataError, generate.GenerateError, netcdf.NetcdfError) as e:
+    except (data.DataError, context.ProjectError, generate.GenerateError,
+            netcdf.NetcdfError) as e:
         print(f"configme: {e}", file=sys.stderr)
         return 1
 

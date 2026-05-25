@@ -1,0 +1,16 @@
+# Hostname -> machine auto-detection map (see docs/DESIGN.md sec. 6).
+#
+# Each key is a glob pattern matched (fnmatch) against the machine's hostname
+# and fully-qualified domain name; the value is a shipped machine name. The
+# match only provides a *default* machine — it is below explicit -m/--machine
+# and the .configme/config.toml selection in precedence, and is always
+# overridable. No match means configme falls through to an interactive prompt.
+#
+# Seeded conservatively and best-effort: patterns below should be verified on
+# the actual login nodes and extended via PR. Prefer leaving an entry out over
+# shipping a pattern that auto-selects the wrong machine.
+
+[hostnames]
+"*.lvt.dkrz.de" = "dkrz_levante"
+"levante*" = "dkrz_levante"
+"albedo*" = "awi_albedo"

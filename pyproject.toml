@@ -26,6 +26,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 configme = [
+    "data/*.toml",
     "data/packages/*.toml",
     "data/orchestrators/*.toml",
     "data/machines/*.mk",
