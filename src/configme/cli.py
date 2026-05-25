@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from configme import __version__, data
+from configme import __version__, data, netcdf
 
 # Verbs handled by subparsers. Anything else in first position is treated as a
 # config-only package target (the `configme [pkgs...]` form).
@@ -80,7 +80,16 @@ def cmd_config(targets) -> int:
 
 
 def cmd_netcdf(args: argparse.Namespace) -> int:
-    _pending("netCDF detection (`configme netcdf`)", issue=2)
+    """Detect and print the netCDF roots. With -v, also show the resolved
+    include/link flags and where they came from."""
+    info = netcdf.detect()
+    print(f"NC_FROOT={info.nc_froot or ''}")
+    print(f"NC_CROOT={info.nc_croot or ''}")
+    if args.verbose:
+        print(f"# source: {info.source}")
+        print(f"INC_NC={info.inc_nc}")
+        print(f"LIB_NC={info.lib_nc}")
+    return 0
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -109,6 +118,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_list.set_defaults(func=cmd_list)
 
     p_netcdf = sub.add_parser("netcdf", help="detect & print NC_FROOT / NC_CROOT")
+    p_netcdf.add_argument("-v", "--verbose", action="store_true",
+                          help="also print INC_NC / LIB_NC and the detection source")
     p_netcdf.set_defaults(func=cmd_netcdf)
 
     p_init = sub.add_parser("init", help="scaffold/validate a .configme/ folder")
@@ -156,7 +167,7 @@ def main(argv=None) -> int:
     except NotImplementedYet as e:
         _report_pending(e)
         return 2
-    except data.DataError as e:
+    except (data.DataError, netcdf.NetcdfError) as e:
         print(f"configme: {e}", file=sys.stderr)
         return 1
 
