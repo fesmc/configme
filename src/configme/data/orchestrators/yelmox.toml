@@ -23,14 +23,8 @@ default_packages = [
 # Typed post-config extras (see docs/DESIGN.md sec. 12).
 extras = ["runme_config", "data_link"]
 
-# Root-level links yelmox creates to its components for the parent Makefile.
-[[orchestrator.links]]
-dep = "fesm-utils"
-[[orchestrator.links]]
-dep = "yelmo"
-[[orchestrator.links]]
-dep = "FastIsostasy"
-[[orchestrator.links]]
-dep = "coordinates"
-[[orchestrator.links]]
-dep = "rembo1"
+# Components are cloned as sub-packages directly under the orchestrator dir
+# (yelmox/yelmo, yelmox/fesm-utils, ...), so the orchestrator references them
+# directly and needs no root-level links. Inter-component links (e.g.
+# yelmox/yelmo/fesm-utils -> ../fesm-utils) come from each package's own
+# [[package.links]].

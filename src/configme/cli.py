@@ -18,7 +18,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from configme import __version__, context, data, generate, netcdf
+from configme import __version__, context, data, generate, install, netcdf
 
 # Verbs handled by subparsers. Anything else in first position is treated as a
 # config-only package target (the `configme [pkgs...]` form).
@@ -276,7 +276,17 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    _pending(f"`configme install {args.target}`", issue=6)
+    return install.run_install(
+        args.target,
+        download=args.download,
+        install_dir=args.install_dir,
+        machine=args.machine,
+        compiler=args.compiler,
+        overwrite=args.overwrite,
+        build_deps=args.build_deps,
+        dry_run=args.dry_run,
+        prompt_fn=_prompt_choice,
+    )
 
 
 # ----------------------------------------------------------------- parser
@@ -350,7 +360,7 @@ def main(argv=None) -> int:
         _report_pending(e)
         return 2
     except (data.DataError, context.ProjectError, generate.GenerateError,
-            netcdf.NetcdfError) as e:
+            install.InstallError, netcdf.NetcdfError) as e:
         print(f"configme: {e}", file=sys.stderr)
         return 1
 
