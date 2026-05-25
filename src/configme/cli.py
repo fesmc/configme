@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
-from configme import __version__, data, netcdf
+from configme import __version__, data, generate, netcdf
 
 # Verbs handled by subparsers. Anything else in first position is treated as a
 # config-only package target (the `configme [pkgs...]` form).
@@ -71,12 +72,82 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 # ----------------------------------------------------------- stubbed verbs
 
-def cmd_config(targets) -> int:
-    scope = ", ".join(targets) if targets else "all packages in the current orchestrator"
-    _pending(
-        f"config-only Makefile generation ({scope})",
-        issue=3,
+def _prompt_choice(label: str, options) -> str:
+    """Prompt for a value, showing available options. TTY only."""
+    if not sys.stdin.isatty():
+        raise generate.GenerateError(
+            f"no {label} given; pass --{label[:7]} "
+            f"(available: {', '.join(options) or 'none'})"
+        )
+    print(f"Available {label}s: {', '.join(options) or '(none)'}")
+    while True:
+        ans = input(f"  {label}: ").strip()
+        if ans:
+            return ans
+
+
+def _resolve_selection(machine, compiler):
+    """Resolve machine + compiler from flags, prompting on a TTY otherwise.
+
+    (The richer precedence — orchestrator/user config, hostname detection —
+    arrives with the .configme contract in issue #5.)"""
+    if not machine:
+        machine = _prompt_choice("machine", data.machines())
+    if not compiler:
+        compiler = _prompt_choice("compiler", data.compilers())
+    return machine, compiler
+
+
+def _resolve_target_root(name: str, cwd: Path):
+    """Map a target name to (root_path, config_subdir).
+
+    The root is the target's directory if it sits under cwd, or cwd itself when
+    cwd already *is* that directory (so configme works both from a parent and
+    from inside the repo)."""
+    orchestrators = data.orchestrators()
+    packages = data.packages()
+    if name in orchestrators:
+        dirname, subdir = orchestrators[name].dir, ""
+    elif name in packages:
+        dirname, subdir = packages[name].dir, packages[name].config_subdir
+    else:
+        known = sorted(set(orchestrators) | set(packages))
+        raise generate.GenerateError(
+            f"unknown target '{name}'. Supported: {', '.join(known)}"
+        )
+    if (cwd / dirname).is_dir():
+        return cwd / dirname, subdir
+    if cwd.name == dirname:
+        return cwd, subdir
+    raise generate.GenerateError(
+        f"could not find '{name}' at {cwd / dirname} or as the current directory. "
+        f"Run from its parent directory or from inside it."
     )
+
+
+def cmd_config(targets, machine, compiler) -> int:
+    cwd = Path.cwd()
+
+    # With no explicit target, configure the orchestrator at the current dir.
+    # (Iterating the full manifest of packages is issue #5.)
+    if not targets:
+        orchestrators = data.orchestrators()
+        match = next((o for o in orchestrators.values() if o.dir == cwd.name), None)
+        if match is None:
+            raise generate.GenerateError(
+                "not inside a known orchestrator; name a target "
+                f"(e.g. `configme yelmox`) or run from one of: "
+                f"{', '.join(sorted(o.dir for o in orchestrators.values()))}"
+            )
+        targets = [match.name]
+
+    machine, compiler = _resolve_selection(machine, compiler)
+
+    for name in targets:
+        root, subdir = _resolve_target_root(name, cwd)
+        out = generate.generate_makefile(root, machine, compiler, subdir)
+        print(f"  + {name}: wrote {out}  (machine={machine}, compiler={compiler})")
+    return 0
 
 
 def cmd_netcdf(args: argparse.Namespace) -> int:
@@ -148,26 +219,29 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = _build_parser()
 
-    # Config-only shortcut: a leading token that is neither a flag nor a known
-    # verb means `configme [pkgs...]` — (re)configure those packages.
-    if argv and not argv[0].startswith("-") and argv[0] not in VERBS:
-        try:
-            return cmd_config(argv)
-        except NotImplementedYet as e:
-            _report_pending(e)
-            return 2
-
-    args = parser.parse_args(argv)
-
+    # Config-only form: `configme [targets...] [-m M] [-c C]`. It is selected
+    # unless the first token is a known verb or a top-level flag (-h/-V). This
+    # way both `configme yelmox ...` and `configme -m macbook ...` route here,
+    # while `configme list` / `configme --help` go to the verb parser.
+    top_flags = {"-h", "--help", "-V", "--version"}
+    is_config_only = not (argv and (argv[0] in VERBS or argv[0] in top_flags))
     try:
+        if is_config_only:
+            cfg = argparse.ArgumentParser(prog="configme")
+            cfg.add_argument("targets", nargs="*")
+            cfg.add_argument("-m", "--machine", default=None)
+            cfg.add_argument("-c", "--compiler", default=None)
+            a = cfg.parse_args(argv)
+            return cmd_config(a.targets, a.machine, a.compiler)
+
+        args = parser.parse_args(argv)
         if getattr(args, "verb", None) is None:
-            # Bare `configme` => config-only across the current orchestrator.
-            return cmd_config([])
+            return cmd_config([], None, None)
         return args.func(args)
     except NotImplementedYet as e:
         _report_pending(e)
         return 2
-    except (data.DataError, netcdf.NetcdfError) as e:
+    except (data.DataError, generate.GenerateError, netcdf.NetcdfError) as e:
         print(f"configme: {e}", file=sys.stderr)
         return 1
 
