@@ -117,7 +117,10 @@ def _config_targets(targets, project, cwd):
             dirname, subdir, style = orchestrators[name].dir, "", orchestrators[name].config_style
         elif name in packages:
             p = packages[name]
-            dirname, subdir, style = p.dir, p.config_subdir, p.config_style
+            # honor the orchestrator's component-path override when in a project
+            dirname = (project.orchestrator.path_of(p) if project is not None
+                       else p.dir)
+            subdir, style = p.config_subdir, p.config_style
         else:
             known = sorted(set(orchestrators) | set(packages))
             raise context.ProjectError(
@@ -146,7 +149,7 @@ def _config_targets(targets, project, cwd):
               project.orchestrator.config_style)]
     for name in context.manifest_packages(project):
         p = packages[name]
-        root = project.root / p.dir
+        root = project.root / project.orchestrator.path_of(p)
         if not root.exists():
             print(f"  - {name}: not present under {project.root} "
                   f"(clone via `configme install`); skipping")
@@ -176,7 +179,7 @@ def cmd_config(targets, machine, compiler) -> int:
                   f"(use `configme install --build-deps`); skipping")
             continue
         cfgroot = root / subdir if subdir else root
-        if generate.has_common(cfgroot) or name == project_orch_name(project):
+        if generate.has_common(cfgroot):
             out = generate.generate_makefile(root, machine, compiler,
                                              machine_path, compiler_path, subdir)
             print(f"  + {name}: wrote {out}")
@@ -184,6 +187,11 @@ def cmd_config(targets, machine, compiler) -> int:
         elif generate.legacy_flat_config(cfgroot, machine, compiler) is not None:
             out = generate.legacy_makefile(root, machine, compiler, subdir)
             print(f"  + {name}: wrote {out} (LEGACY flat config — migrate to common.mk)")
+            n_ok += 1
+        elif name == project_orch_name(project):
+            out = generate.generate_makefile(root, machine, compiler,
+                                             machine_path, compiler_path, subdir)
+            print(f"  + {name}: wrote {out} (no common.mk; orchestrator has no deps?)")
             n_ok += 1
         else:
             print(f"  - {name}: no common.mk and no legacy config "

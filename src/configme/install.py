@@ -171,7 +171,11 @@ def _root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, 
 
 
 def _dest_of(node: Node, plan: Plan, root: Path) -> Path:
-    return root if node.name == plan.primary.name else root / node.dir
+    if node.name == plan.primary.name:
+        return root
+    if plan.orchestrator is not None:
+        return root / plan.orchestrator.component_paths.get(node.name, node.dir)
+    return root / node.dir
 
 
 def run_install(target: str, *, download: str, install_dir: Optional[str],
@@ -247,7 +251,10 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         for link in node.links:
             dep_dest = present_dirs.get(link.dep)
             if dep_dest is None and link.dep in pkgs_all:
-                dep_dest = root / pkgs_all[link.dep].dir
+                sub = (plan.orchestrator.component_paths.get(
+                       link.dep, pkgs_all[link.dep].dir)
+                       if plan.orchestrator else pkgs_all[link.dep].dir)
+                dep_dest = root / sub
             link_path = node_root / link.path
             dep_present = dep_dest is not None and dep_dest.exists()
             # A dependency not in this install set and not already on disk is
@@ -288,7 +295,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             results["skipped"].append(node.name)
             continue
         try:
-            if generate.has_common(cfgroot) or node.is_orchestrator:
+            if generate.has_common(cfgroot):
                 out = generate.generate_makefile(dest, machine, compiler,
                                                  machine_path, compiler_path,
                                                  node.config_subdir)
@@ -298,6 +305,12 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 out = generate.legacy_makefile(dest, machine, compiler,
                                                node.config_subdir)
                 print(f"  + configure {node.name}: {out} (LEGACY flat config)")
+                results["configured"].append(node.name)
+            elif node.is_orchestrator:
+                out = generate.generate_makefile(dest, machine, compiler,
+                                                 machine_path, compiler_path,
+                                                 node.config_subdir)
+                print(f"  + configure {node.name}: {out} (no common.mk)")
                 results["configured"].append(node.name)
             else:
                 print(f"  - {node.name}: no common.mk and no legacy config "

@@ -107,6 +107,13 @@ class Orchestrator:
     default_packages: List[str] = field(default_factory=list)
     extras: dict = field(default_factory=dict)
     links: List[Link] = field(default_factory=list)
+    # Optional per-orchestrator override of where each component lives, relative
+    # to the orchestrator root (default is the package's own `dir`). e.g.
+    # climber-x places yelmo at src/yelmo and fesm-utils at src/utils/fesm-utils.
+    component_paths: Dict[str, str] = field(default_factory=dict)
+
+    def path_of(self, package: "Package") -> str:
+        return self.component_paths.get(package.name, package.dir)
 
     @classmethod
     def from_file(cls, path: Path) -> "Orchestrator":
@@ -125,6 +132,7 @@ class Orchestrator:
                 default_packages=list(orch.get("default_packages", [])),
                 extras=dict(orch.get("extras", {})),
                 links=links,
+                component_paths=dict(orch.get("component_paths", {})),
             )
         except KeyError as e:
             raise DataError(
