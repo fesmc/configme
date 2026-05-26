@@ -18,13 +18,19 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-from configme import netcdf
+from configme import data, netcdf
 
 PLACEHOLDER = "<COMPILER_CONFIGURATION>"
+
+# configme-shipped common.mk overlays for packages whose common.mk is not (yet)
+# committed in their own repo. Dropped into the package's config/ at configure
+# time so the package can be configured without modifying its upstream.
+OVERLAYS_DIR = data.DATA_DIR / "overlays"
 
 # A machine fragment "provides netCDF" (and thus overrides auto-detection) if it
 # assigns any of these variables.
@@ -123,6 +129,29 @@ def generate_makefile(root: Path, machine: str, compiler: str,
 
 def has_common(cfgroot: Path) -> bool:
     return find_repo_file(cfgroot, "common.mk") is not None
+
+
+def overlay_common(pkg_name: str) -> Optional[Path]:
+    """A configme-shipped common.mk overlay for pkg_name, if one exists."""
+    p = OVERLAYS_DIR / pkg_name / "common.mk"
+    return p if p.is_file() else None
+
+
+def ensure_common(pkg_name: str, cfgroot: Path) -> Optional[Path]:
+    """If the package has no common.mk but configme ships an overlay for it,
+    copy the overlay into <cfgroot>/config/common.mk. Returns the destination if
+    copied, else None. Lets configme configure a package whose common.mk is not
+    yet committed upstream (e.g. FastIsostasy)."""
+    if has_common(cfgroot):
+        return None
+    overlay = overlay_common(pkg_name)
+    if overlay is None:
+        return None
+    dest_dir = cfgroot / "config" if (cfgroot / "config").is_dir() else cfgroot / ".configme"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "common.mk"
+    shutil.copyfile(overlay, dest)
+    return dest
 
 
 def legacy_flat_config(cfgroot: Path, machine: str, compiler: str) -> Optional[Path]:

@@ -14,14 +14,23 @@ modifying the component repos prematurely.
 
 | package | artifact | notes | landed in repo? |
 |---------|----------|-------|-----------------|
-| yelmo        | [`yelmo/common.mk`](yelmo/common.mk)               | — | not yet |
-| FastIsostasy | [`FastIsostasy/common.mk`](FastIsostasy/common.mk) | — | not yet |
-| rembo1       | [`rembo1/common.mk`](rembo1/common.mk)             | folds `$(INC_COORD)` into `FFLAGS` | not yet |
-| coordinates  | [`coordinates/common.mk`](coordinates/common.mk)   | also needs a 1-line template normalization, see [`coordinates/README.md`](coordinates/README.md) | not yet |
+| yelmo             | [`yelmo/common.mk`](yelmo/common.mk)               | — | yes (committed to yelmo) |
+| fesm-utils/utils  | [`fesm-utils/common.mk`](fesm-utils/common.mk)     | netCDF only | yes (committed to fesm-utils) |
+| rembo1            | [`rembo1/common.mk`](rembo1/common.mk)             | folds `$(INC_COORD)` into `FFLAGS` | yes (committed to rembo1) |
+| FastIsostasy      | [`FastIsostasy/common.mk`](FastIsostasy/common.mk) | shipped as a configme **overlay** (`data/overlays/FastIsostasy/common.mk`), copied into the checkout at configure time — **not** committed to the FastIsostasy repo | no (overlay) |
+| coordinates       | [`coordinates/common.mk`](coordinates/common.mk)   | also needs a 1-line template normalization, see [`coordinates/README.md`](coordinates/README.md) | not yet |
 
 Each artifact is verified by generating a Makefile from a working copy and
 confirming the `openmp` / `petsc` toggles and link flags resolve as in the
 legacy build.
+
+## Overlays
+
+When a package's `common.mk` cannot (yet) be committed to its own repo,
+configme ships it as an *overlay* under `src/configme/data/overlays/<pkg>/
+common.mk`. At configure time configme copies the overlay into the package's
+`config/common.mk` (if absent) so the package configures via the normal modern
+path without modifying its upstream. FastIsostasy uses this today.
 
 ## Legacy fallback
 

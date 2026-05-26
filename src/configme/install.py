@@ -295,6 +295,9 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             results["skipped"].append(node.name)
             continue
         try:
+            copied = generate.ensure_common(node.name, cfgroot)
+            if copied is not None:
+                print(f"  ~ {node.name}: copied configme-provided common.mk -> {copied}")
             if generate.has_common(cfgroot):
                 out = generate.generate_makefile(dest, machine, compiler,
                                                  machine_path, compiler_path,

@@ -179,6 +179,9 @@ def cmd_config(targets, machine, compiler) -> int:
                   f"(use `configme install --build-deps`); skipping")
             continue
         cfgroot = root / subdir if subdir else root
+        copied = generate.ensure_common(name, cfgroot)
+        if copied is not None:
+            print(f"  ~ {name}: copied configme-provided common.mk -> {copied}")
         if generate.has_common(cfgroot):
             out = generate.generate_makefile(root, machine, compiler,
                                              machine_path, compiler_path, subdir)

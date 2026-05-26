@@ -31,4 +31,5 @@ configme = [
     "data/orchestrators/*.toml",
     "data/machines/*.mk",
     "data/compilers/*.mk",
+    "data/overlays/*/common.mk",
 ]
