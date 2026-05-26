@@ -15,5 +15,8 @@
 "levante*" = "dkrz_levante"
 "albedo*" = "awi_albedo"
 # PIK cluster: login nodes resolve to <host>.hpc2023.pik-potsdam.de (the DNS
-# domain is hpc2023 even though the system is branded "HPC2024").
+# domain is hpc2023 even though the system is branded "HPC2024"). Both domains
+# are mapped so a future rename to hpc2024 is still caught; the machine name
+# stays pik_hpc2024 regardless.
 "*.hpc2023.pik-potsdam.de" = "pik_hpc2024"
+"*.hpc2024.pik-potsdam.de" = "pik_hpc2024"
