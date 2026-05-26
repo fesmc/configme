@@ -14,3 +14,6 @@
 "*.lvt.dkrz.de" = "dkrz_levante"
 "levante*" = "dkrz_levante"
 "albedo*" = "awi_albedo"
+# PIK cluster: login nodes resolve to <host>.hpc2023.pik-potsdam.de (the DNS
+# domain is hpc2023 even though the system is branded "HPC2024").
+"*.hpc2023.pik-potsdam.de" = "pik_hpc2024"
