@@ -77,7 +77,16 @@ def _resolve_deps(name: str, pkgs: Dict[str, data.Package],
         seen.append(name)
 
 
-def build_plan(target: str) -> Plan:
+def build_plan(target: str, *, only: bool = False) -> Plan:
+    """Resolve a target string into an ordered install/config Plan.
+
+    Grammar (shared by ``configme install`` and ``configme config``):
+      * ``yelmox``        orchestrator + its full default set (expanded)
+      * ``yelmo``         a package + the sub-packages it needs (auto-resolved)
+      * ``yelmox+yelmo``  exactly those, no expansion / auto-resolution
+      * ``only=True``     exactly the named target — no orchestrator expansion
+                          and no dependency resolution (the ``--only`` flag)
+    """
     orchs = data.orchestrators()
     pkgs = data.packages()
 
@@ -89,6 +98,13 @@ def build_plan(target: str) -> Plan:
         return Plan(primary, nodes, explicit=True, orchestrator=orch)
 
     primary = _node_for(target)
+
+    if only:
+        # Exactly the named target: no subpackages, no deps. Marked explicit so
+        # the link phase treats any deps as pending rather than expecting them.
+        orch = orchs.get(primary.name) if primary.is_orchestrator else None
+        return Plan(primary, [primary], explicit=True, orchestrator=orch)
+
     if primary.is_orchestrator:
         orch = orchs[primary.name]
         order = []
@@ -159,13 +175,16 @@ class Runner:
 
 # --------------------------------------------------------------- main entry
 
-def _configure_makefile(*, label, pkg_name, dest, config_subdir, is_orchestrator,
-                        machine, compiler, machine_path, compiler_path,
-                        dry_run, results) -> None:
+def configure_makefile(*, label, pkg_name, dest, config_subdir, is_orchestrator,
+                       machine, compiler, machine_path, compiler_path,
+                       dry_run, results) -> None:
     """Generate one Makefile (modern common.mk, overlay, or legacy fallback),
     printing progress and recording the outcome in `results`. `label` is the
     display name (e.g. 'yelmo' or 'fesm-utils/utils'); `pkg_name` keys overlay
-    lookup."""
+    lookup.
+
+    Shared by `configme install` and `configme config` — the single Makefile
+    generation code path."""
     cfgroot = dest / config_subdir if config_subdir else dest
     if dry_run:
         print(f"  configure {label}: (dry) would generate Makefile")
@@ -201,9 +220,10 @@ def _configure_makefile(*, label, pkg_name, dest, config_subdir, is_orchestrator
         results["failed"].append(label)
 
 
-def _root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, bool]:
+def root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, bool]:
     """Return (root, primary_present). root holds the primary; components are
-    sub-dirs of it."""
+    sub-dirs of it. Default root is within the orchestrator (``yelmox/``) or the
+    named package (``yelmo/``, with its deps as ``yelmo/fesm-utils``)."""
     if install_dir:
         return Path(install_dir).expanduser().resolve(), False
     # Inside an existing primary checkout?
@@ -212,7 +232,7 @@ def _root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, 
     return (cwd / plan.primary.dir).resolve(), False
 
 
-def _dest_of(node: Node, plan: Plan, root: Path) -> Path:
+def dest_of(node: Node, plan: Plan, root: Path) -> Path:
     if node.name == plan.primary.name:
         return root
     if plan.orchestrator is not None:
@@ -223,10 +243,11 @@ def _dest_of(node: Node, plan: Plan, root: Path) -> Path:
 def run_install(target: str, *, download: str, install_dir: Optional[str],
                 machine: Optional[str], compiler: Optional[str],
                 overwrite: bool, build_deps: bool, dry_run: bool,
-                prompt_fn, ask_fn=None) -> int:
+                only: bool = False,
+                prompt_fn=None, ask_fn=None, confirm_fn=None) -> int:
     cwd = Path.cwd()
-    plan = build_plan(target)                      # fail-fast: unknown names
-    root, primary_present = _root_for(plan, install_dir, cwd)
+    plan = build_plan(target, only=only)           # fail-fast: unknown names
+    root, primary_present = root_for(plan, install_dir, cwd)
 
     # Resolve selection early (fail-fast on missing machine/compiler) using the
     # project at root if it already exists.
@@ -268,7 +289,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     for node in plan.nodes:
         if node.name == plan.primary.name:
             continue
-        dest = _dest_of(node, plan, root)
+        dest = dest_of(node, plan, root)
         try:
             st = runner.clone(node, dest)
             print(f"  clone {node.name}: {st}")
@@ -280,11 +301,11 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     runner.emit("\n# --- links ---")
     plan_names = {n.name for n in plan.nodes}
     pkgs_all = data.packages()
-    present_dirs = {n.name: _dest_of(n, plan, root) for n in plan.nodes}
+    present_dirs = {n.name: dest_of(n, plan, root) for n in plan.nodes}
     for node in plan.nodes:
         if node.name == plan.primary.name:
             continue
-        node_root = _dest_of(node, plan, root)
+        node_root = dest_of(node, plan, root)
         # Don't fabricate links (or a stray package dir) for a package that
         # isn't actually present. In dry-run nothing is on disk, so still show
         # the intended links.
@@ -324,23 +345,24 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     common_kw = dict(machine=machine, compiler=compiler, machine_path=machine_path,
                      compiler_path=compiler_path, dry_run=dry_run, results=results)
     for node in plan.nodes:
-        dest = _dest_of(node, plan, root)
+        dest = dest_of(node, plan, root)
         if node.config_style == "build.py":
-            _emit_build_py(runner, node, dest, machine, compiler, build_deps, info)
+            _emit_build_py(runner, node, dest, machine, compiler, build_deps,
+                           info, confirm_fn)
             # A build.py package may also have a makefile-template subcomponent
             # (e.g. fesm-utils/utils, with its own template + common.mk) that
             # configme generates directly.
             if node.config_subdir:
                 label = f"{node.name}/{node.config_subdir}"
                 runner.emit(f"# configure {label} Makefile (configme)")
-                _configure_makefile(label=label, pkg_name=node.name, dest=dest,
+                configure_makefile(label=label, pkg_name=node.name, dest=dest,
                                     config_subdir=node.config_subdir,
                                     is_orchestrator=False, **common_kw)
             else:
                 results["skipped" if not build_deps else "configured"].append(node.name)
             continue
         runner.emit(f"(cd {dest} && configme {node.name} -m {machine} -c {compiler})")
-        _configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
+        configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
                             config_subdir=node.config_subdir,
                             is_orchestrator=node.is_orchestrator, **common_kw)
 
@@ -372,26 +394,46 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     return 1 if results["failed"] else 0
 
 
-def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info):
-    """fesm-utils-style package: print/run its build.py (see issue #7)."""
+def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
+                   confirm_fn=None):
+    """fesm-utils-style package: print/run its build.py (see issue #7).
+
+    The build runs autotools and is slow (~10-30 min), so it is not run
+    unconditionally. ``--build-deps`` forces it; otherwise, on an interactive
+    run, the user is asked (default yes). Dry runs and non-interactive sessions
+    without ``--build-deps`` only print the command to run later.
+    """
     nc_env = ""
     if info is not None and info.nc_froot and info.nc_croot:
         nc_env = f"NC_FROOT={info.nc_froot} NC_CROOT={info.nc_croot} "
     cmd = f"{nc_env}./build.py --variant both -m {machine} -c {compiler}"
     runner.emit(f"# {node.name}: build with autotools (slow, ~10-30 min):")
     runner.emit(f"(cd {dest} && {cmd})")
-    if build_deps and not runner.dry_run and dest.is_dir():
-        print(f"  building {node.name}: {cmd}")
-        try:
-            env = dict(os.environ)
-            if info is not None and info.nc_froot:
-                env["NC_FROOT"] = info.nc_froot
-                env["NC_CROOT"] = info.nc_croot or ""
-            subprocess.run(["./build.py", "--variant", "both",
-                            "-m", machine, "-c", compiler],
-                           cwd=dest, check=True, env=env)
-        except (subprocess.CalledProcessError, OSError) as e:
-            print(f"  ! {node.name} build failed: {e}")
-    else:
+
+    if runner.dry_run or not dest.is_dir():
         print(f"  - {node.name}: build.py-style; run when ready:")
         print(f"      (cd {dest} && {cmd})")
+        return
+
+    do_build = build_deps
+    if not do_build and confirm_fn is not None:
+        print(f"  {node.name} needs an autotools build (slow, ~10-30 min):")
+        print(f"      (cd {dest} && {cmd})")
+        do_build = confirm_fn(f"Build {node.name} now?", True)
+
+    if not do_build:
+        print(f"  - {node.name}: build.py-style; run when ready:")
+        print(f"      (cd {dest} && {cmd})")
+        return
+
+    print(f"  building {node.name}: {cmd}")
+    try:
+        env = dict(os.environ)
+        if info is not None and info.nc_froot:
+            env["NC_FROOT"] = info.nc_froot
+            env["NC_CROOT"] = info.nc_croot or ""
+        subprocess.run(["./build.py", "--variant", "both",
+                        "-m", machine, "-c", compiler],
+                       cwd=dest, check=True, env=env)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"  ! {node.name} build failed: {e}")

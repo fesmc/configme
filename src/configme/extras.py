@@ -81,7 +81,7 @@ def _data_link(value, runner, root: Path, cfg: dict, ask) -> str:
     labels = value if isinstance(value, list) else [value]
     done = []
     for label in labels:
-        path = cfg.get(label) or ask(f"path to {label} (Enter to skip)")
+        path = cfg.get(label) or ask(f"path to {label}")
         runner.emit(f"# data_link {label}: ln -s <path> {label}")
         if not path:
             print(f"  data_link {label}: no path given; pending (link later)")

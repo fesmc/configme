@@ -10,9 +10,9 @@ the Makefile for each component from its template using shared machine/compiler
 fragments, and clone/link a whole stack with one command.
 
 ```bash
-configme install yelmox    # clone + configure + link a whole stack
-configme yelmo             # (re)configure a single package
-configme                   # (re)configure every package in the current orchestrator
+configme install yelmox    # clone + configure + link (+ build) a whole stack
+configme config yelmox     # (re)generate Makefiles for an already-present stack
+configme                   # (re)configure the current directory (orchestrator or package)
 configme netcdf            # detect & print NC_FROOT / NC_CROOT
 ```
 
@@ -56,6 +56,21 @@ cd yelmox                  # an orchestrator checkout
 configme init              # scaffold .configme/ (manifest + config)
 configme -m macbook -c gfortran   # configure every package in the manifest
 ```
+
+### Configure part of a stack
+
+`configme config` shares its target grammar with `configme install`, so the
+same names work for both:
+
+```bash
+configme config yelmo -m macbook -c gfortran    # yelmo + the sub-packages it needs
+configme config yelmox+yelmo                     # exactly those two, no expansion
+configme config yelmo --only                     # just yelmo, nothing pulled in
+cd yelmo && configme -m macbook -c gfortran      # bare = `configme config` on this dir
+```
+
+`configme config` only (re)generates Makefiles — it never clones, links, or
+builds. Add `--dry-run` to preview which Makefiles would change.
 
 Run `configme --help` for the full command surface and `configme list` to see
 the supported orchestrators, packages, machines, and compilers.

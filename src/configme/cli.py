@@ -2,14 +2,16 @@
 
 Command surface (see docs/DESIGN.md sec. 4)::
 
-    configme install <target> [options]   clone/use-existing + configure + link
-    configme [pkgs...]                     config-only: (re)generate Makefile(s)
+    configme install <target> [options]   clone/use-existing + configure + link + build
+    configme config [<target>] [options]  config-only: (re)generate Makefile(s)
+    configme [-m M] [-c C]                alias for `configme config` on the current dir
     configme netcdf                        detect & print NC_FROOT / NC_CROOT
     configme init                          scaffold/validate a .configme/ folder
     configme list                          supported packages / machines / compilers
 
-`list`, `netcdf`, `init`, and the config-only form are implemented. `install`
-is still stubbed with a pointer to its tracking issue.
+`install` and `config` share one target grammar (`install.build_plan`) and one
+Makefile-generation path (`install.configure_makefile`); `config` is the
+`install` configure step without clone / link / extras / build.
 """
 
 from __future__ import annotations
@@ -20,9 +22,9 @@ from pathlib import Path
 
 from configme import __version__, context, data, generate, install, netcdf
 
-# Verbs handled by subparsers. Anything else in first position is treated as a
-# config-only package target (the `configme [pkgs...]` form).
-VERBS = {"install", "netcdf", "init", "list"}
+# Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
+# configures the current orchestrator; name packages with `configme config`.
+VERBS = {"install", "config", "netcdf", "init", "list"}
 
 
 # ----------------------------------------------------------------- not-yet-impl
@@ -85,13 +87,33 @@ def _prompt_choice(label: str, options) -> str:
             return ans
 
 
-def _ask(label: str) -> "str | None":
+def _ask(label: str, default: "str | None" = None) -> "str | None":
     """Free-text prompt for extras values; returns None when non-interactive
-    (so extras degrade to 'pending' rather than blocking)."""
+    (so extras degrade to 'pending' rather than blocking). The default that
+    applies when the user just presses Enter is always shown — '(None)' when
+    there is no default."""
     if not sys.stdin.isatty():
-        return None
-    ans = input(f"  {label}: ").strip()
-    return ans or None
+        return default
+    shown = default if default is not None else "None"
+    ans = input(f"  {label} ({shown}): ").strip()
+    return ans or default
+
+
+def _confirm(question: str, default: bool = True) -> bool:
+    """Yes/no prompt. Returns ``default`` when non-interactive (no TTY), so
+    scripted/CI runs are not blocked. The default is shown as the capitalised
+    choice in ``[Y/n]`` / ``[y/N]``."""
+    if not sys.stdin.isatty():
+        return default
+    suffix = "[Y/n]" if default else "[y/N]"
+    while True:
+        ans = input(f"  {question} {suffix}: ").strip().lower()
+        if not ans:
+            return default
+        if ans in ("y", "yes"):
+            return True
+        if ans in ("n", "no"):
+            return False
 
 
 def _nudge(kind: str, name: str, tier: str) -> None:
@@ -104,111 +126,86 @@ def _nudge(kind: str, name: str, tier: str) -> None:
               f"https://github.com/fesmc/configme (PR or issue).")
 
 
-def _config_targets(targets, project, cwd):
-    """Resolve the list of (name, root, config_subdir, config_style) to build.
-
-    With explicit targets, resolve each against cwd/project. With none, expand
-    the orchestrator: its own Makefile plus every manifest package present."""
-    orchestrators = data.orchestrators()
-    packages = data.packages()
-
-    def resolve_one(name):
-        if name in orchestrators:
-            dirname, subdir, style = orchestrators[name].dir, "", orchestrators[name].config_style
-        elif name in packages:
-            p = packages[name]
-            # honor the orchestrator's component-path override when in a project
-            dirname = (project.orchestrator.path_of(p) if project is not None
-                       else p.dir)
-            subdir, style = p.config_subdir, p.config_style
-        else:
-            known = sorted(set(orchestrators) | set(packages))
-            raise context.ProjectError(
-                f"unknown target '{name}'. Supported: {', '.join(known)}")
-        # Prefer the project root when set; else cwd-relative or cwd itself.
-        base = project.root if project is not None else cwd
-        if (base / dirname).is_dir():
-            return name, base / dirname, subdir, style
-        if base.name == dirname:
-            return name, base, subdir, style
-        raise context.ProjectError(
-            f"could not find '{name}' at {base / dirname} or as the current "
-            f"directory. Clone it (configme install) or run from the right place.")
-
-    if targets:
-        return [resolve_one(n) for n in targets]
-
-    if project is None:
-        raise context.ProjectError(
-            "not inside a known orchestrator; name a target (e.g. `configme "
-            "yelmox`), run `configme init`, or cd into one of: "
-            f"{', '.join(sorted(o.dir for o in orchestrators.values()))}")
-
-    # Bare form: the orchestrator's own Makefile + each manifest package present.
-    items = [(project.orchestrator.name, project.root, "",
-              project.orchestrator.config_style)]
-    for name in context.manifest_packages(project):
-        p = packages[name]
-        root = project.root / project.orchestrator.path_of(p)
-        if not root.exists():
-            print(f"  - {name}: not present under {project.root} "
-                  f"(clone via `configme install`); skipping")
-            continue
-        items.append((name, root, p.config_subdir, p.config_style))
-    return items
-
-
-def cmd_config(targets, machine, compiler) -> int:
-    cwd = Path.cwd()
+def _bare_target(cwd: Path) -> str:
+    """Map the current directory to a config target: the orchestrator it roots,
+    else the package it roots. Errors if it is neither."""
     project = context.find_project(cwd)
+    if project is not None:
+        return project.orchestrator.name
+    pkg = context.find_package(cwd)
+    if pkg is not None:
+        return pkg
+    raise context.ProjectError(
+        "not inside a known orchestrator or package; name a target (e.g. "
+        "`configme config yelmox`), run `configme init`, or cd into a package "
+        "or one of: "
+        f"{', '.join(sorted(o.dir for o in data.orchestrators().values()))}")
 
-    items = _config_targets(targets, project, cwd)
+
+def cmd_config(target, machine, compiler, *, only: bool = False,
+               dry_run: bool = False) -> int:
+    """(Re)generate Makefiles for the planned packages — config-only: no clone,
+    no link, no extras, no build. Shares `install`'s target grammar
+    (`build_plan`) and Makefile generation (`configure_makefile`); it is exactly
+    the `install` configure step without the surrounding setup."""
+    cwd = Path.cwd()
+    if not target:
+        target = _bare_target(cwd)
+
+    plan = install.build_plan(target, only=only)
+    root, _ = install.root_for(plan, None, cwd)
+    project = context.find_project(root) if root.exists() else None
+
     machine, compiler = context.resolve_selection(machine, compiler, project,
                                                   prompt_fn=_prompt_choice)
-
     machine_path, machine_tier = context.resolve_fragment("machine", machine, project)
     compiler_path, compiler_tier = context.resolve_fragment("compiler", compiler, project)
     _nudge("machine", machine, machine_tier)
     _nudge("compiler", compiler, compiler_tier)
 
-    print(f"Configuring (machine={machine}, compiler={compiler}):")
-    n_ok = 0
-    for name, root, subdir, style in items:
-        if style == "build.py":
-            print(f"  - {name}: build.py-style; build via "
-                  f"`configme install --build-deps`")
-            if not subdir:
-                continue
-            # but still configure its makefile-template subcomponent (utils/)
-        # Display label: a build.py package's subcomponent shows as name/subdir.
-        label = f"{name}/{subdir}" if (style == "build.py" and subdir) else name
-        cfgroot = root / subdir if subdir else root
-        copied = generate.ensure_common(name, cfgroot)
-        if copied is not None:
-            print(f"  ~ {label}: copied configme-provided common.mk -> {copied}")
-        if generate.has_common(cfgroot):
-            out = generate.generate_makefile(root, machine, compiler,
-                                             machine_path, compiler_path, subdir)
-            print(f"  + {label}: wrote {out}")
-            n_ok += 1
-        elif generate.legacy_flat_config(cfgroot, machine, compiler) is not None:
-            out = generate.legacy_makefile(root, machine, compiler, subdir)
-            print(f"  + {label}: wrote {out} (LEGACY flat config — migrate to common.mk)")
-            n_ok += 1
-        elif name == project_orch_name(project):
-            out = generate.generate_makefile(root, machine, compiler,
-                                             machine_path, compiler_path, subdir)
-            print(f"  + {label}: wrote {out} (no common.mk; orchestrator has no deps?)")
-            n_ok += 1
-        else:
-            print(f"  - {label}: no common.mk and no legacy config "
-                  f"'{machine}_{compiler}'; skipping")
-    print(f"Done: {n_ok} Makefile(s) generated.")
-    return 0
+    header = "DRY RUN — no changes will be made.\n" if dry_run else ""
+    print(f"{header}configme config {target}")
+    print(f"  root: {root}")
+    print(f"  machine={machine}  compiler={compiler}")
+    print(f"  packages: {', '.join(n.name for n in plan.nodes)}"
+          f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
+
+    results = {"configured": [], "skipped": [], "failed": []}
+    common_kw = dict(machine=machine, compiler=compiler, machine_path=machine_path,
+                     compiler_path=compiler_path, dry_run=dry_run, results=results)
+    for node in plan.nodes:
+        dest = install.dest_of(node, plan, root)
+        if node.config_style == "build.py":
+            # The autotools build is a separate, slow step owned by `install`;
+            # `config` only (re)generates the makefile-template subcomponent.
+            print(f"  - {node.name}: build.py-style; build is a separate step "
+                  f"(`configme install {node.name} --build-deps`)")
+            if node.config_subdir:
+                install.configure_makefile(
+                    label=f"{node.name}/{node.config_subdir}", pkg_name=node.name,
+                    dest=dest, config_subdir=node.config_subdir,
+                    is_orchestrator=False, **common_kw)
+            else:
+                results["skipped"].append(node.name)
+            continue
+        install.configure_makefile(
+            label=node.name, pkg_name=node.name, dest=dest,
+            config_subdir=node.config_subdir,
+            is_orchestrator=node.is_orchestrator, **common_kw)
+
+    print("\nSummary:")
+    for key in ("configured", "skipped", "failed"):
+        if results[key]:
+            print(f"  {key}: {', '.join(results[key])}")
+    return 1 if results["failed"] else 0
 
 
-def project_orch_name(project):
-    return project.orchestrator.name if project is not None else None
+def cmd_config_verb(args: argparse.Namespace) -> int:
+    """`configme config [target]` — explicit verb form of in-place
+    (re)configuration; does not clone, link, or build (use `configme install`
+    for that)."""
+    return cmd_config(args.target, args.machine, args.compiler,
+                      only=args.only, dry_run=args.dry_run)
 
 
 def cmd_netcdf(args: argparse.Namespace) -> int:
@@ -312,8 +309,10 @@ def cmd_install(args: argparse.Namespace) -> int:
         overwrite=args.overwrite,
         build_deps=args.build_deps,
         dry_run=args.dry_run,
+        only=args.only,
         prompt_fn=_prompt_choice,
         ask_fn=_ask,
+        confirm_fn=_confirm,
     )
 
 
@@ -324,8 +323,9 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="configme",
         description="Configure the build of the yelmox / climber-x model stacks "
         "from one source of machine/compiler truth.",
-        epilog="With no verb, `configme [pkgs...]` (re)generates Makefiles for the "
-        "named packages (or all packages in the current orchestrator).",
+        epilog="With no verb, `configme` (re)generates Makefiles for every "
+        "package in the current orchestrator. Use `configme config <pkgs...>` "
+        "to target specific packages, or `configme install` to clone + build.",
     )
     parser.add_argument("-V", "--version", action="version",
                         version=f"configme {__version__}")
@@ -342,6 +342,21 @@ def _build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init", help="scaffold/validate a .configme/ folder")
     p_init.set_defaults(func=cmd_init)
 
+    p_config = sub.add_parser(
+        "config", help="(re)generate Makefiles for already-present packages "
+        "(no clone/link/build)")
+    p_config.add_argument(
+        "target", nargs="?", default=None,
+        help="orchestrator, package, or '+'-joined literal list "
+        "(e.g. yelmox, yelmo, yelmox+yelmo). Default: the current directory.")
+    p_config.add_argument("-m", "--machine", default=None)
+    p_config.add_argument("-c", "--compiler", default=None)
+    p_config.add_argument("--only", action="store_true",
+                          help="configure only the named target — do not expand "
+                          "an orchestrator to its subpackages")
+    p_config.add_argument("--dry-run", action="store_true")
+    p_config.set_defaults(func=cmd_config_verb)
+
     p_install = sub.add_parser(
         "install", help="clone/use-existing + configure + link a stack")
     p_install.add_argument(
@@ -353,6 +368,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_install.add_argument("--dir", dest="install_dir", default=None)
     p_install.add_argument("-m", "--machine", default=None)
     p_install.add_argument("-c", "--compiler", default=None)
+    p_install.add_argument("--only", action="store_true",
+                           help="install only the named target — do not expand "
+                           "an orchestrator to its subpackages or pull deps")
     p_install.add_argument("--overwrite", action="store_true")
     p_install.add_argument("--build-deps", action="store_true")
     p_install.add_argument("--dry-run", action="store_true")
@@ -365,24 +383,33 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = _build_parser()
 
-    # Config-only form: `configme [targets...] [-m M] [-c C]`. It is selected
-    # unless the first token is a known verb or a top-level flag (-h/-V). This
-    # way both `configme yelmox ...` and `configme -m macbook ...` route here,
-    # while `configme list` / `configme --help` go to the verb parser.
+    # Bare form: `configme [-m M] [-c C]` (no verb, no targets) configures the
+    # current orchestrator. It is selected unless the first token is a known verb
+    # or a top-level flag (-h/-V), so `configme -m macbook` routes here while
+    # `configme list` / `configme --help` go to the verb parser. Naming packages
+    # without a verb (`configme yelmox`) is redirected to `configme config`.
     top_flags = {"-h", "--help", "-V", "--version"}
-    is_config_only = not (argv and (argv[0] in VERBS or argv[0] in top_flags))
+    is_bare = not (argv and (argv[0] in VERBS or argv[0] in top_flags))
     try:
-        if is_config_only:
+        if is_bare:
             cfg = argparse.ArgumentParser(prog="configme")
             cfg.add_argument("targets", nargs="*")
             cfg.add_argument("-m", "--machine", default=None)
             cfg.add_argument("-c", "--compiler", default=None)
+            cfg.add_argument("--only", action="store_true")
+            cfg.add_argument("--dry-run", action="store_true")
             a = cfg.parse_args(argv)
-            return cmd_config(a.targets, a.machine, a.compiler)
+            if a.targets:
+                raise context.ProjectError(
+                    "to configure specific packages, use `configme config "
+                    f"{' '.join(a.targets)}` (bare `configme` configures the "
+                    "current directory; `configme install` clones + builds).")
+            return cmd_config(None, a.machine, a.compiler,
+                              only=a.only, dry_run=a.dry_run)
 
         args = parser.parse_args(argv)
         if getattr(args, "verb", None) is None:
-            return cmd_config([], None, None)
+            return cmd_config(None, None, None)
         return args.func(args)
     except NotImplementedYet as e:
         _report_pending(e)

@@ -27,7 +27,7 @@ This document is the agreed design. It is the input to the issue breakdown
   with the *same* information.
 - A single command to clone, configure, and link a whole stack
   (`configme install yelmox`) or to (re)configure one package
-  (`configme yelmo`) or all of them (`configme`).
+  (`configme config yelmo`) or all of them (`configme`).
 - Auto-detect the netCDF installation (`nf-config` / `nc-config`) so users no
   longer have to set `NC_FROOT` / `NC_CROOT` in `.bashrc` / `.zshrc`.
 - Support multiple **orchestrators** (yelmox, climber-x) that compile different
@@ -97,12 +97,19 @@ freshly-cloned supported orchestrator should carry its own manifest.
 ## 4. Command surface
 
 ```
-configme install <target> [options]   # clone/use-existing + configure + link
-configme [pkgs…]                       # config-only: (re)generate Makefile(s)
+configme install <target> [options]   # clone/use-existing + configure + link + build
+configme config [<target>] [options]  # config-only: (re)generate Makefile(s)
+configme [-m M] [-c C]                # alias for `configme config` on the current dir
 configme netcdf                        # detect & print NC_FROOT / NC_CROOT
 configme init                          # scaffold/validate a .configme/ folder
 configme list                          # supported packages / machines / compilers
 ```
+
+`install` and `config` share **one** target grammar (`build_plan`) and **one**
+Makefile-generation path (`configure_makefile`); `config` is exactly the
+`install` configure step without the surrounding clone / link / extras / build.
+So any `<target>` valid for one is valid for the other, and `--only` behaves
+identically for both.
 
 ### `configme install`
 
@@ -121,6 +128,8 @@ Options (mirroring today's `install.py`):
 - `--overwrite` — re-clone, moving existing copies aside.
 - `--build-deps` — also run `build.py`-style package builds (e.g. fesm-utils);
   off by default (§9).
+- `--only` — install only the named target: no orchestrator expansion and no
+  dependency resolution (the single-target equivalent of a `+`-list).
 - `--dry-run` — print the full plan (and the `.install.sh` it would write)
   without executing (§12).
 
@@ -130,16 +139,29 @@ Selection semantics:
 - A **`+`-separated list** is literal: exactly those packages, no
   auto-resolution. (Missing dependencies are handled per §12d.)
 - An **orchestrator name** pulls its full default set.
+- **`--only`** collapses any of the above to exactly the named target.
 
 `configme install` may be run from anywhere (uses `--dir`) or from *inside* an
 already-cloned orchestrator/package, in which case it skips cloning that root
 and performs the remaining steps.
 
-### `configme [pkgs…]` (config-only)
+### `configme config [<target>]` (config-only)
 
 Regenerates Makefile(s) from template + central machine/compiler + repo
-`common.mk`. No clone, no link. Bare `configme` = every package in the current
-orchestrator. This is the original `configme yelmo` / `configme FastIsostasy`.
+`common.mk`. No clone, no link, no extras, no build — it is the `install`
+configure step in isolation, over the same `build_plan` target set. So
+`configme config yelmox` expands to the orchestrator + its subpackages,
+`configme config yelmox+yelmo` is the literal two-package list, and
+`configme config fesm-utils` configures fesm-utils (its `utils/` makefile
+subcomponent; the autotools build itself is an `install`-only step, noted but
+not run). `--only` and `--dry-run` work exactly as for `install`.
+
+With **no target** it reflects the current directory: inside an orchestrator it
+configures that orchestrator + subpackages, inside a single package's directory
+it configures that package (+ the deps it needs, unless `--only`). Naming
+packages without the `config` verb (`configme yelmo`) is rejected with a hint,
+to keep it distinct from `configme install yelmo`; bare `configme` is an alias
+for `configme config` on the current directory.
 
 ---
 

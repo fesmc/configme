@@ -94,6 +94,17 @@ def find_project(cwd: Path) -> Optional[Project]:
     return None
 
 
+def find_package(cwd: Path) -> Optional[str]:
+    """Identify a standalone package rooted at ``cwd`` by directory name.
+
+    Used by the bare/config-only form: run inside a single package's directory
+    (not an orchestrator), ``configme`` configures just that package."""
+    for name, pkg in data.packages().items():
+        if cwd.name == pkg.dir:
+            return name
+    return None
+
+
 def manifest_packages(project: Project) -> List[str]:
     """Package list for the project: the local manifest if present, else the
     orchestrator's shipped default set. Validates every entry is supported."""
