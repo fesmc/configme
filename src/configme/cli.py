@@ -559,10 +559,18 @@ def main(argv=None) -> int:
             cfg.add_argument("--dry-run", action="store_true")
             a = cfg.parse_args(argv)
             if a.targets:
+                target_str = " ".join(a.targets)
+                cwd = Path.cwd()
+                managed = (context.find_project(cwd) is not None
+                           or context.find_package(cwd) is not None)
+                if managed:
+                    raise context.ProjectError(
+                        "to configure specific packages, use `configme config "
+                        f"{target_str}` (bare `configme` configures the current "
+                        "directory; `configme install` clones + builds).")
                 raise context.ProjectError(
-                    "to configure specific packages, use `configme config "
-                    f"{' '.join(a.targets)}` (bare `configme` configures the "
-                    "current directory; `configme install` clones + builds).")
+                    "current directory is not managed by configme. To clone and "
+                    f"build '{target_str}' here, run `configme install {target_str}`.")
             return cmd_config(None, a.machine, a.compiler,
                               only=a.only, dry_run=a.dry_run)
 
