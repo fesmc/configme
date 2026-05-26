@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "configme"
-version = "0.1.1"
+# Single-sourced from configme.__version__ (see [tool.setuptools.dynamic]).
+dynamic = ["version"]
 description = "Configure the build of the yelmox / climber-x model stacks from one source of machine- and compiler-specific truth."
 readme = "README.md"
 requires-python = ">=3.8"
@@ -20,6 +21,9 @@ dependencies = [
 
 [project.scripts]
 configme = "configme.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "configme.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
