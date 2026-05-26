@@ -55,8 +55,8 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask) -> str:
         return ""
     src = root / ".runme" / "runme_config"
     dst = root / ".runme_config"
-    hpc = cfg.get("hpc") or ask("hpc for .runme_config")
-    account = cfg.get("account") or ask("account for .runme_config")
+    hpc = cfg.get("hpc") or ask("hpc name for .runme_config")
+    account = cfg.get("account") or ask("hpc account for .runme_config")
     runner.emit("# runme_config: create .runme_config and set hpc/account")
     runner.emit("runme --config  # or: cp .runme/runme_config .runme_config")
     if runner.dry_run:
