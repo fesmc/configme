@@ -10,6 +10,10 @@ org = "fesmc"
 repo = "fesm-utils"
 dir = "fesm-utils"
 config_style = "build.py"
+# fesm-utils is build.py at the top (autotools build of LIS + FFTW + utils),
+# but its utils/ subcomponent is a makefile-template build. config_styles is
+# informational (shown by `configme list`); config_style drives behaviour.
+config_styles = ["build.py", "makefile-template"]
 # config.py / config/ for the utils component live in the utils/ subdirectory,
 # not at the repo root.
 config_subdir = "utils"

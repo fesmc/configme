@@ -60,7 +60,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     print("\nPackages:")
     if packages:
         for name, p in packages.items():
-            print(f"  {name:14s} {p.org}/{p.repo}  [{p.config_style}]")
+            print(f"  {name:14s} {p.org}/{p.repo}  [{', '.join(p.config_styles)}]")
     else:
         print("  (none)")
 

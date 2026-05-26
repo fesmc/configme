@@ -72,9 +72,13 @@ class Package:
     org: str
     repo: str
     dir: str
-    config_style: str  # "makefile-template" | "build.py"
+    config_style: str  # primary (behavioural): "makefile-template" | "build.py"
     config_subdir: str = ""  # e.g. fesm-utils keeps its config under utils/
     links: List[Link] = field(default_factory=list)
+    # Optional informational list of all config styles a package exposes, for
+    # display only (e.g. fesm-utils is build.py at the top but its utils/
+    # subcomponent is makefile-template). Defaults to [config_style].
+    config_styles: List[str] = field(default_factory=list)
 
     @classmethod
     def from_file(cls, path: Path) -> "Package":
@@ -84,14 +88,16 @@ class Package:
             raise DataError(f"{path}: missing [package] table")
         links = [Link.from_dict(d, path) for d in pkg.get("links", [])]
         try:
+            style = pkg.get("config_style", "makefile-template")
             return cls(
                 name=pkg["name"],
                 org=pkg["org"],
                 repo=pkg["repo"],
                 dir=pkg.get("dir", pkg["name"]),
-                config_style=pkg.get("config_style", "makefile-template"),
+                config_style=style,
                 config_subdir=pkg.get("config_subdir", ""),
                 links=links,
+                config_styles=list(pkg.get("config_styles", [])) or [style],
             )
         except KeyError as e:
             raise DataError(f"{path}: [package] missing required key {e}") from e
