@@ -40,6 +40,13 @@ class Node:
     config_subdir: str
     links: list
     is_orchestrator: bool
+    clone: bool = True
+    subpackages: list = field(default_factory=list)
+    build: "Optional[data.BuildSpec]" = None
+    # For a subpackage node: the parent package name and the path relative to the
+    # parent's dest (so its location follows the parent under any orchestrator).
+    parent: Optional[str] = None
+    subdir: str = ""
 
 
 @dataclass
@@ -61,9 +68,39 @@ def _node_for(name: str) -> Node:
     if name in pkgs:
         p = pkgs[name]
         return Node(p.name, p.org, p.repo, p.dir, p.config_style,
-                    p.config_subdir, p.links, False)
+                    p.config_subdir, p.links, False,
+                    clone=p.clone, subpackages=p.subpackages, build=p.build)
     known = sorted(set(orchs) | set(pkgs))
     raise InstallError(f"unknown target '{name}'. Supported: {', '.join(known)}")
+
+
+def _with_subpackages(nodes: List[Node]) -> List[Node]:
+    """Expand each node's contained subpackages, inserted right after it. A
+    subpackage shares its parent's checkout (not cloned separately), so its dest
+    is anchored to the parent via `parent`/`subdir`. Deduped by name."""
+    out: List[Node] = []
+    seen = set()
+    for n in nodes:
+        if n.name not in seen:
+            out.append(n)
+            seen.add(n.name)
+        for sub_name in n.subpackages:
+            if sub_name in seen:
+                continue
+            sub = _node_for(sub_name)
+            sub.parent = n.name
+            sub.subdir = str(Path(sub.dir).relative_to(n.dir))
+            out.append(sub)
+            seen.add(sub_name)
+    return out
+
+
+def _parent_of(name: str) -> Optional[str]:
+    """The package that contains `name` as a subpackage, if any."""
+    for pkg in data.packages().values():
+        if name in pkg.subpackages:
+            return pkg.name
+    return None
 
 
 def _resolve_deps(name: str, pkgs: Dict[str, data.Package],
@@ -95,15 +132,18 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         nodes = [_node_for(n) for n in names]
         primary = next((n for n in nodes if n.is_orchestrator), nodes[0])
         orch = orchs.get(primary.name) if primary.is_orchestrator else None
-        return Plan(primary, nodes, explicit=True, orchestrator=orch)
+        return Plan(primary, _with_subpackages(nodes), explicit=True,
+                    orchestrator=orch)
 
     primary = _node_for(target)
 
     if only:
-        # Exactly the named target: no subpackages, no deps. Marked explicit so
-        # the link phase treats any deps as pending rather than expecting them.
+        # Exactly the named target: no deps. Subpackages still ride along (they
+        # are part of the same checkout, not separate dependencies). Marked
+        # explicit so the link phase treats any deps as pending.
         orch = orchs.get(primary.name) if primary.is_orchestrator else None
-        return Plan(primary, [primary], explicit=True, orchestrator=orch)
+        return Plan(primary, _with_subpackages([primary]), explicit=True,
+                    orchestrator=orch)
 
     if primary.is_orchestrator:
         orch = orchs[primary.name]
@@ -112,13 +152,15 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         for comp in orch.default_packages:
             _resolve_deps(comp, pkgs, order)
         nodes = [_node_for(n) for n in order] + [primary]
-        return Plan(primary, nodes, explicit=False, orchestrator=orch)
+        return Plan(primary, _with_subpackages(nodes), explicit=False,
+                    orchestrator=orch)
 
     # single package: its deps (auto) then itself
     order: List[str] = []
     _resolve_deps(primary.name, pkgs, order)
     nodes = [_node_for(n) for n in order]
-    return Plan(primary, nodes, explicit=False, orchestrator=None)
+    return Plan(primary, _with_subpackages(nodes), explicit=False,
+                orchestrator=None)
 
 
 # --------------------------------------------------------------- runner
@@ -235,6 +277,12 @@ def root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, b
 def dest_of(node: Node, plan: Plan, root: Path) -> Path:
     if node.name == plan.primary.name:
         return root
+    # A subpackage lives inside its parent's checkout, so anchor it to the
+    # parent's dest (which already accounts for orchestrator component_paths).
+    if node.parent is not None:
+        parent = next((n for n in plan.nodes if n.name == node.parent), None)
+        if parent is not None:
+            return dest_of(parent, plan, root) / node.subdir
     if plan.orchestrator is not None:
         return root / plan.orchestrator.component_paths.get(node.name, node.dir)
     return root / node.dir
@@ -247,6 +295,14 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 select_fn=None, ask_fn=None, confirm_fn=None) -> int:
     cwd = Path.cwd()
     plan = build_plan(target, only=only)           # fail-fast: unknown names
+    if not plan.primary.clone:
+        parent = _parent_of(plan.primary.name)
+        hint = (f"run `configme install {parent}`" if parent
+                else "install its parent package")
+        raise InstallError(
+            f"{plan.primary.name} is a component of another package's checkout "
+            f"and cannot be installed on its own; {hint}. (To (re)generate its "
+            f"Makefile use `configme config {plan.primary.name}`.)")
     root, primary_present = root_for(plan, install_dir, cwd)
 
     # Resolve selection early (fail-fast on missing machine/compiler) using the
@@ -288,6 +344,11 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
 
     for node in plan.nodes:
         if node.name == plan.primary.name:
+            continue
+        if not node.clone:
+            # A contained component (e.g. fesm-utils/utils): it arrives with its
+            # parent's checkout, so there is nothing to clone.
+            runner.emit(f"# {node.name}: component of {node.parent} (not cloned)")
             continue
         dest = dest_of(node, plan, root)
         try:
@@ -361,9 +422,9 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         if node.config_style == "build.py":
             _emit_build_py(runner, node, dest, machine, compiler, build_deps,
                            info, confirm_fn)
-            # A build.py package may also have a makefile-template subcomponent
-            # (e.g. fesm-utils/utils, with its own template + common.mk) that
-            # configme generates directly.
+            # A build.py package may also expose a makefile-template config
+            # subdir that configme generates directly. (fesm-utils instead now
+            # carries its utils component as a separate subpackage.)
             if node.config_subdir:
                 label = f"{node.name}/{node.config_subdir}"
                 runner.emit(f"# configure {label} Makefile (configme)")
@@ -373,10 +434,16 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             else:
                 results["skipped" if not build_deps else "configured"].append(node.name)
             continue
-        runner.emit(f"(cd {dest} && configme {node.name} -m {machine} -c {compiler})")
+        runner.emit(f"(cd {dest} && configme config {node.name} "
+                    f"-m {machine} -c {compiler})")
         configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
                             config_subdir=node.config_subdir,
                             is_orchestrator=node.is_orchestrator, **common_kw)
+        # A package configme owns the build of (e.g. fesm-utils/utils) is
+        # compiled here, after its Makefile exists. Gated like the build.py step.
+        if node.build is not None:
+            _build_make_package(runner, node, dest, build_deps,
+                                confirm_fn, results)
 
     # --- extras (orchestrator post-config steps)
     if plan.orchestrator is not None and plan.orchestrator.extras:
@@ -449,3 +516,44 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
                        cwd=dest, check=True, env=env)
     except (subprocess.CalledProcessError, OSError) as e:
         print(f"  ! {node.name} build failed: {e}")
+
+
+def _build_make_package(runner, node, dest, build_deps, confirm_fn, results):
+    """Compile a package whose build configme owns (`[package.build]`), once per
+    variant: ``make openmp=<0|1> <make_target>``. Runs in the inherited shell
+    environment (the Makefile already carries the configme-resolved compiler /
+    netCDF, so no module loading is needed here). Gated like the build.py step:
+    ``--build-deps`` forces it, an interactive run asks (default yes), and dry /
+    non-interactive runs only print the commands."""
+    spec = node.build
+    cmds = [(v, f"make openmp={spec.openmp_flag(v)} {spec.make_target}")
+            for v in spec.variants]
+    runner.emit(f"# {node.name}: build ({', '.join(spec.variants)}):")
+    for _, cmd in cmds:
+        runner.emit(f"(cd {dest} && {cmd})")
+
+    def _defer(reason: str) -> None:
+        print(f"  - {node.name}: {reason}; build when ready:")
+        for _, cmd in cmds:
+            print(f"      (cd {dest} && {cmd})")
+
+    if runner.dry_run or not dest.is_dir():
+        _defer("configured")
+        return
+
+    do_build = build_deps
+    if not do_build and confirm_fn is not None:
+        print(f"  {node.name} needs a make build ({', '.join(spec.variants)}):")
+        do_build = confirm_fn(f"Build {node.name} now?", True)
+    if not do_build:
+        _defer("build deferred")
+        return
+
+    for variant, cmd in cmds:
+        print(f"  building {node.name} ({variant}): {cmd}")
+        try:
+            subprocess.run(["make", f"openmp={spec.openmp_flag(variant)}",
+                            spec.make_target], cwd=dest, check=True)
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"  ! {node.name} build failed: {e}")
+            results["failed"].append(f"{node.name} ({variant})")

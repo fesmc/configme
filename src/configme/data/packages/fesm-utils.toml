@@ -1,8 +1,10 @@
-# fesm-utils: shared utility libraries (LIS + FFTW + utils).
+# fesm-utils: shared utility libraries. The repo's own build.py drives the
+# autotools build of LIS + FFTW (slow); its makefile-template `utils` component
+# is configured/built by configme as the `fesm-utils/utils` subpackage.
 #
-# Structural outlier: no config/Makefile template. Its "configuration" is an
-# autotools build driven by its own build.py + machines/*.toml registry, so
-# configme treats it as a build.py-style package (see docs/DESIGN.md sec. 8).
+# Structural outlier: no config/Makefile template at the repo root. Its top-level
+# "configuration" is the autotools build, so configme treats it as a build.py
+# package (see docs/DESIGN.md sec. 8) and delegates utils to the subpackage.
 
 [package]
 name = "fesm-utils"
@@ -10,10 +12,10 @@ org = "fesmc"
 repo = "fesm-utils"
 dir = "fesm-utils"
 config_style = "build.py"
-# fesm-utils is build.py at the top (autotools build of LIS + FFTW + utils),
-# but its utils/ subcomponent is a makefile-template build. config_styles is
-# informational (shown by `configme list`); config_style drives behaviour.
+# fesm-utils is build.py at the top (autotools build of LIS + FFTW), and carries
+# a makefile-template `utils` component as a contained subpackage. config_styles
+# is informational (shown by `configme list`); config_style drives behaviour.
 config_styles = ["build.py", "makefile-template"]
-# config.py / config/ for the utils component live in the utils/ subdirectory,
-# not at the repo root.
-config_subdir = "utils"
+# utils lives inside this checkout; configme configures and builds it as a
+# separate node that rides along wherever fesm-utils goes.
+subpackages = ["fesm-utils/utils"]

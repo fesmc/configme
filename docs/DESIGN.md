@@ -165,9 +165,10 @@ Regenerates Makefile(s) from template + central machine/compiler + repo
 configure step in isolation, over the same `build_plan` target set. So
 `configme config yelmox` expands to the orchestrator + its subpackages,
 `configme config yelmox+yelmo` is the literal two-package list, and
-`configme config fesm-utils` configures fesm-utils (its `utils/` makefile
-subcomponent; the autotools build itself is an `install`-only step, noted but
-not run). `--only` and `--dry-run` work exactly as for `install`.
+`configme config fesm-utils` configures its `fesm-utils/utils` subpackage's
+Makefile (the autotools build of fesm-utils itself, and the utils compile, are
+`install`-only steps, noted but not run). `--only` and `--dry-run` work exactly
+as for `install`.
 
 With **no target** it reflects the current directory: inside an orchestrator it
 configures that orchestrator + subpackages, inside a single package's directory
@@ -299,17 +300,32 @@ concerns:
 ## 8. Compile boundary and fesm-utils
 
 - configme **configures only** — it never runs `make` for the orchestrator or
-  template packages. Compilation is an explicit user step.
-- **fesm-utils** is the structural outlier: no `config/Makefile` template, an
-  autotools build of LIS/FFTW/utils (slow, ~10–30 min), and its own
-  `machines/*.toml` registry. configme treats it as a **`build.py`-style
-  package**:
-  - default: clone + link + **print** the exact
-    `build.py --variant both -m <machine> -c <compiler>` command;
-  - `--build-deps`: actually invoke `build.py`.
-  - configme forwards the resolved machine/compiler names and the detected
-    netCDF roots; it does **not** centralise fesm-utils' machine registry
-    (autotools needs different variables/modules).
+  template packages. Compilation is an explicit user step. The one exception is
+  a package that declares a `[package.build]` spec (see `fesm-utils/utils`
+  below), which configme builds via `make` after configuring it.
+- **fesm-utils** is the structural outlier. Its checkout holds two distinct
+  things, modelled as two packages:
+  - **`fesm-utils`** itself — no `config/Makefile` template; the slow autotools
+    build of LIS/FFTW (~10–30 min) driven by its own `build.py` +
+    `machines/*.toml` registry. configme treats it as a **`build.py`-style
+    package**: default is clone + link + **print** the exact
+    `build.py --variant both -m <machine> -c <compiler>` command; `--build-deps`
+    actually invokes `build.py`. configme forwards the resolved
+    machine/compiler names and detected netCDF roots; it does **not** centralise
+    fesm-utils' machine registry (autotools needs different variables/modules).
+  - **`fesm-utils/utils`** — the shared utility library (`libfesmutils`), a
+    makefile-template package contained in the fesm-utils checkout. It is
+    declared as a `subpackage` of `fesm-utils` (so it rides along wherever
+    fesm-utils is installed), marked `clone = false` (it arrives with the parent
+    checkout and cannot be an install primary), and carries a `[package.build]`
+    spec. configme generates its Makefile from the central machine/compiler
+    fragments and, on `configme install fesm-utils` (with `--build-deps` or an
+    interactive yes), builds it with `make openmp={0,1} fesmutils-static` in the
+    inherited environment.
+- **Subpackages** are the general mechanism for a component that shares another
+  package's checkout: listed in the parent's `subpackages`, expanded into the
+  plan right after the parent, and located relative to the parent's dest (so
+  they follow any orchestrator `component_paths`).
 
 ---
 

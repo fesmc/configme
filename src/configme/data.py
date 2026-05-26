@@ -17,7 +17,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 try:  # tomllib is stdlib on Python >= 3.11; tomli is the backport otherwise.
     import tomllib as _toml
@@ -67,6 +67,37 @@ class Link:
 
 
 @dataclass
+class BuildSpec:
+    """How configme compiles a makefile-template package it owns the build of
+    (currently only ``fesm-utils/utils``). The Makefile is generated first by
+    the normal configure step; configme then runs ``make openmp=<0|1>
+    <make_target>`` once per variant, in the inherited shell environment (no
+    module loading — that is the user's / build.py's responsibility)."""
+
+    make_target: str
+    variants: List[str] = field(default_factory=lambda: ["serial"])
+
+    # openmp= flag value passed to make for each variant name.
+    _VARIANT_FLAG = {"serial": 0, "omp": 1}
+
+    @classmethod
+    def from_dict(cls, d: dict, source: Path) -> "BuildSpec":
+        target = d.get("make_target")
+        if not target:
+            raise DataError(f"{source}: [package.build] missing 'make_target'")
+        variants = list(d.get("variants", ["serial"]))
+        bad = [v for v in variants if v not in cls._VARIANT_FLAG]
+        if bad:
+            raise DataError(
+                f"{source}: [package.build] unknown variant(s) {bad}; "
+                f"valid: {sorted(cls._VARIANT_FLAG)}")
+        return cls(make_target=target, variants=variants)
+
+    def openmp_flag(self, variant: str) -> int:
+        return self._VARIANT_FLAG[variant]
+
+
+@dataclass
 class Package:
     name: str
     org: str
@@ -79,6 +110,15 @@ class Package:
     # display only (e.g. fesm-utils is build.py at the top but its utils/
     # subcomponent is makefile-template). Defaults to [config_style].
     config_styles: List[str] = field(default_factory=list)
+    # False for a component that lives inside another package's checkout (e.g.
+    # fesm-utils/utils): it is never cloned on its own and cannot be an install
+    # primary; it appears when its parent is cloned.
+    clone: bool = True
+    # Components contained in this package's checkout, configured/built in the
+    # same plan right after it (no separate clone). Names must be known packages.
+    subpackages: List[str] = field(default_factory=list)
+    # If set, configme builds this package via `make` after configuring it.
+    build: "Optional[BuildSpec]" = None
 
     @classmethod
     def from_file(cls, path: Path) -> "Package":
@@ -87,6 +127,7 @@ class Package:
         if pkg is None:
             raise DataError(f"{path}: missing [package] table")
         links = [Link.from_dict(d, path) for d in pkg.get("links", [])]
+        build = pkg.get("build")
         try:
             style = pkg.get("config_style", "makefile-template")
             return cls(
@@ -98,6 +139,9 @@ class Package:
                 config_subdir=pkg.get("config_subdir", ""),
                 links=links,
                 config_styles=list(pkg.get("config_styles", [])) or [style],
+                clone=bool(pkg.get("clone", True)),
+                subpackages=list(pkg.get("subpackages", [])),
+                build=BuildSpec.from_dict(build, path) if build else None,
             )
         except KeyError as e:
             raise DataError(f"{path}: [package] missing required key {e}") from e
