@@ -367,6 +367,23 @@ def hostname_machine() -> Optional[str]:
     return None
 
 
+def _compiler_defaults() -> Dict[str, str]:
+    path = data.DATA_DIR / "compiler_defaults.toml"
+    if not path.is_file():
+        return {}
+    return _load_toml(path).get("default_compiler", {})
+
+
+def default_compiler(machine: Optional[str]) -> Optional[str]:
+    """The default compiler for ``machine`` from the shipped per-machine table
+    (``data/compiler_defaults.toml``), or None when the machine is unknown or
+    has no default. Used only to *propose* a selection — never to override an
+    explicit ``-c``/config choice."""
+    if not machine:
+        return None
+    return _compiler_defaults().get(machine)
+
+
 # --------------------------------------------------------------- selection
 
 def resolve_selection(machine: Optional[str], compiler: Optional[str],
@@ -376,11 +393,12 @@ def resolve_selection(machine: Optional[str], compiler: Optional[str],
         explicit flag > orchestrator config.toml > user config.toml
                       > hostname auto-detect (machine only) > prompt
 
-    Anything still unresolved is obtained from ``select_fn(need_machine,
-    need_compiler, project)`` (a single combined prompt; see cli._select), which
-    returns the chosen values for the kinds that were needed. Persists the
-    resolved pair into the project's config.toml so later runs inside the same
-    orchestrator do not prompt again.
+    When anything is still unresolved, ``select_fn(project, machine, compiler,
+    default_compiler)`` (see cli._select) returns the final, complete pair: it
+    proposes the partially-resolved machine plus the machine's default compiler
+    (from the per-machine table) for one-key confirmation, or prompts for both.
+    Persists the resolved pair into the project's config.toml so later runs
+    inside the same orchestrator do not prompt again.
     """
     proj_cfg = load_config(project)
     user_cfg = load_user_config()
@@ -390,10 +408,9 @@ def resolve_selection(machine: Optional[str], compiler: Optional[str],
     compiler = (compiler or proj_cfg.get("compiler") or user_cfg.get("compiler"))
 
     if not machine or not compiler:
-        sel_machine, sel_compiler = select_fn(
-            need_machine=not machine, need_compiler=not compiler, project=project)
-        machine = machine or sel_machine
-        compiler = compiler or sel_compiler
+        machine, compiler = select_fn(project=project, machine=machine,
+                                      compiler=compiler,
+                                      default_compiler=default_compiler(machine))
 
     # Persist into the orchestrator config so the choice is inherited/reused.
     if project is not None and (proj_cfg.get("machine") != machine

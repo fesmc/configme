@@ -126,31 +126,54 @@ def cmd_new(args: argparse.Namespace) -> int:
 
 # ----------------------------------------------------------- stubbed verbs
 
-def _select(*, need_machine: bool, need_compiler: bool, project):
-    """Combined machine+compiler selection prompt (TTY only).
+def _select(*, project, machine: "str | None" = None,
+            compiler: "str | None" = None, default_compiler: "str | None" = None):
+    """Resolve the machine+compiler selection, prompting as needed, and return
+    the final complete ``(machine, compiler)`` pair.
 
-    When both are needed the user types them as two words (`machine compiler`)
-    in a single question; when only one is needed it is asked alone. An unknown
-    *machine* triggers the escape valve: offer to scaffold `<name>.mk` from
-    `linux` (project + user tier) so a new machine is usable immediately. An
-    unknown *compiler* re-prompts with a hint to `configme new compiler`.
-    Returns (machine_or_None, compiler_or_None) for the kinds that were needed.
+    ``machine``/``compiler`` are whatever was already resolved (flag, config, or
+    hostname); either may be None. ``default_compiler`` is the machine's table
+    default. When both a machine and a compiler can be proposed (the machine is
+    known and the compiler is set or defaulted), offer one-key confirmation
+    (`Keep this configuration? [Y/n]`); declining picks both by hand. When a
+    complete pair cannot be proposed, prompt for both from the start.
+
+    An unknown *machine* triggers the escape valve: offer to scaffold `<name>.mk`
+    from `linux` so a new machine is usable immediately; an unknown *compiler*
+    re-prompts with a hint to `configme new compiler`.
     """
+    cand_machine = machine
+    cand_compiler = compiler or default_compiler
+
     if not sys.stdin.isatty():
+        # No prompt possible: use a complete proposed config if we have one,
+        # otherwise fail with the actionable hint.
+        if cand_machine and cand_compiler:
+            return cand_machine, cand_compiler
         raise context.ProjectError(
             "no machine/compiler resolved; pass -m/--machine and -c/--compiler "
             "(or set them in .configme/config.toml). "
             f"machines: {', '.join(context.available_fragments('machine', project)) or '(none)'}; "
             f"compilers: {', '.join(context.available_fragments('compiler', project)) or '(none)'}")
 
+    # Only the kinds still missing are prompted; an explicit/config value is kept.
+    need_machine = machine is None
+    need_compiler = compiler is None
+
+    if cand_machine and cand_compiler:
+        print(f"Detected configuration: machine={cand_machine}, compiler={cand_compiler}")
+        if _confirm("Keep this configuration?", True):
+            return cand_machine, cand_compiler
+        need_machine = need_compiler = True  # declined: choose both by hand
+
     m_opts = context.available_fragments("machine", project)
     c_opts = context.available_fragments("compiler", project)
     if need_machine:
-        print("Available machines:  " + (", ".join(m_opts) or "(none)"))
+        print("Available machines:  "
+              + ", ".join(m_opts + ["<new_machine>"]))
     if need_compiler:
         print("Available compilers: " + (", ".join(c_opts) or "(none)"))
 
-    machine = compiler = None
     while True:
         if need_machine and need_compiler:
             parts = input("  machine compiler: ").split()

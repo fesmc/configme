@@ -1,0 +1,17 @@
+# Default compiler per machine (see docs/DESIGN.md sec. 6).
+#
+# When configme would otherwise prompt for a selection and the machine is
+# already known (e.g. hostname-detected) *and* it has a default here, configme
+# proposes the (machine, compiler) pair and asks whether to keep it. Decline to
+# pick both by hand instead.
+#
+# Explicit per machine — no prefix guessing — so adding a machine means adding
+# its default here. HPC login environments default to the Intel `ifx`; personal
+# Linux/macOS default to `gfortran`.
+
+[default_compiler]
+awi_albedo = "ifx"
+dkrz_levante = "ifx"
+pik_hpc2024 = "ifx"
+linux = "gfortran"
+macbook = "gfortran"

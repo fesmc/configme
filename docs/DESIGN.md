@@ -219,11 +219,20 @@ module, or set `NC_FROOT` / `NC_CROOT`) rather than emitting a broken Makefile.
 2. orchestrator `.configme/config.toml` (`machine`, `compiler`)
 3. user-global `~/.configme/config.toml`
 4. hostname auto-detection (configme ships a `hostname-pattern → machine` map)
-5. interactive prompt (TTY only)
+5. per-machine default compiler (configme ships a `machine → compiler` table in
+   `data/compiler_defaults.toml`: HPC environments default to `ifx`, personal
+   Linux/macOS to `gfortran`) — proposed, never silently forced
+6. interactive prompt (TTY only)
 
-The interactive prompt (step 5) is a **single combined question**: when both
-are unresolved the user types `<machine> <compiler>` as two words; when only one
-is missing it is asked alone. Available machines and compilers are listed first.
+When a machine is known (steps 1–4) and a default compiler exists for it
+(step 5), configme **proposes** the complete pair and asks `Keep this
+configuration? [Y/n]`; accepting skips the prompt, declining picks both by
+hand. With no proposable pair, the interactive prompt is a **single combined
+question** — type `<machine> <compiler>` as two words; the machine list
+includes `<new_machine>` to hint that a not-yet-supported name can be typed (it
+triggers the escape valve below). On a non-interactive (no-TTY) run a complete
+proposed pair is used silently; an incomplete one errors with an actionable
+hint to pass `-m`/`-c`.
 
 The selected machine + compiler are recorded in the orchestrator's
 `.configme/config.toml` so every subsequent `configme <pkg>` inside that
