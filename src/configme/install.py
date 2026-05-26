@@ -159,6 +159,48 @@ class Runner:
 
 # --------------------------------------------------------------- main entry
 
+def _configure_makefile(*, label, pkg_name, dest, config_subdir, is_orchestrator,
+                        machine, compiler, machine_path, compiler_path,
+                        dry_run, results) -> None:
+    """Generate one Makefile (modern common.mk, overlay, or legacy fallback),
+    printing progress and recording the outcome in `results`. `label` is the
+    display name (e.g. 'yelmo' or 'fesm-utils/utils'); `pkg_name` keys overlay
+    lookup."""
+    cfgroot = dest / config_subdir if config_subdir else dest
+    if dry_run:
+        print(f"  configure {label}: (dry) would generate Makefile")
+        return
+    if not cfgroot.is_dir():
+        print(f"  - {label}: not present; skipping configure")
+        results["skipped"].append(label)
+        return
+    try:
+        copied = generate.ensure_common(pkg_name, cfgroot)
+        if copied is not None:
+            print(f"  ~ {label}: copied configme-provided common.mk -> {copied}")
+        if generate.has_common(cfgroot):
+            out = generate.generate_makefile(dest, machine, compiler,
+                                             machine_path, compiler_path, config_subdir)
+            print(f"  + configure {label}: {out}")
+            results["configured"].append(label)
+        elif generate.legacy_flat_config(cfgroot, machine, compiler):
+            out = generate.legacy_makefile(dest, machine, compiler, config_subdir)
+            print(f"  + configure {label}: {out} (LEGACY flat config)")
+            results["configured"].append(label)
+        elif is_orchestrator:
+            out = generate.generate_makefile(dest, machine, compiler,
+                                             machine_path, compiler_path, config_subdir)
+            print(f"  + configure {label}: {out} (no common.mk)")
+            results["configured"].append(label)
+        else:
+            print(f"  - {label}: no common.mk and no legacy config "
+                  f"'{machine}_{compiler}'; skipping")
+            results["skipped"].append(label)
+    except (generate.GenerateError, netcdf.NetcdfError) as e:
+        print(f"  ! {label}: {e}")
+        results["failed"].append(label)
+
+
 def _root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, bool]:
     """Return (root, primary_present). root holds the primary; components are
     sub-dirs of it."""
@@ -279,49 +321,28 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         info = netcdf.detect()
     except netcdf.NetcdfError:
         info = None  # configure step will surface this per-package if needed
+    common_kw = dict(machine=machine, compiler=compiler, machine_path=machine_path,
+                     compiler_path=compiler_path, dry_run=dry_run, results=results)
     for node in plan.nodes:
         dest = _dest_of(node, plan, root)
         if node.config_style == "build.py":
             _emit_build_py(runner, node, dest, machine, compiler, build_deps, info)
-            results["skipped" if not build_deps else "configured"].append(node.name)
-            continue
-        cfgroot = dest / node.config_subdir if node.config_subdir else dest
-        runner.emit(f"(cd {dest} && configme {node.name} -m {machine} -c {compiler})")
-        if dry_run:
-            print(f"  configure {node.name}: (dry) would generate Makefile")
-            continue
-        if not cfgroot.is_dir():
-            print(f"  - {node.name}: not present; skipping configure")
-            results["skipped"].append(node.name)
-            continue
-        try:
-            copied = generate.ensure_common(node.name, cfgroot)
-            if copied is not None:
-                print(f"  ~ {node.name}: copied configme-provided common.mk -> {copied}")
-            if generate.has_common(cfgroot):
-                out = generate.generate_makefile(dest, machine, compiler,
-                                                 machine_path, compiler_path,
-                                                 node.config_subdir)
-                print(f"  + configure {node.name}: {out}")
-                results["configured"].append(node.name)
-            elif generate.legacy_flat_config(cfgroot, machine, compiler):
-                out = generate.legacy_makefile(dest, machine, compiler,
-                                               node.config_subdir)
-                print(f"  + configure {node.name}: {out} (LEGACY flat config)")
-                results["configured"].append(node.name)
-            elif node.is_orchestrator:
-                out = generate.generate_makefile(dest, machine, compiler,
-                                                 machine_path, compiler_path,
-                                                 node.config_subdir)
-                print(f"  + configure {node.name}: {out} (no common.mk)")
-                results["configured"].append(node.name)
+            # A build.py package may also have a makefile-template subcomponent
+            # (e.g. fesm-utils/utils, with its own template + common.mk) that
+            # configme generates directly.
+            if node.config_subdir:
+                label = f"{node.name}/{node.config_subdir}"
+                runner.emit(f"# configure {label} Makefile (configme)")
+                _configure_makefile(label=label, pkg_name=node.name, dest=dest,
+                                    config_subdir=node.config_subdir,
+                                    is_orchestrator=False, **common_kw)
             else:
-                print(f"  - {node.name}: no common.mk and no legacy config "
-                      f"'{machine}_{compiler}'; skipping")
-                results["skipped"].append(node.name)
-        except (generate.GenerateError, netcdf.NetcdfError) as e:
-            print(f"  ! {node.name}: {e}")
-            results["failed"].append(node.name)
+                results["skipped" if not build_deps else "configured"].append(node.name)
+            continue
+        runner.emit(f"(cd {dest} && configme {node.name} -m {machine} -c {compiler})")
+        _configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
+                            config_subdir=node.config_subdir,
+                            is_orchestrator=node.is_orchestrator, **common_kw)
 
     # --- extras (orchestrator post-config steps)
     if plan.orchestrator is not None and plan.orchestrator.extras:

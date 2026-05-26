@@ -175,29 +175,33 @@ def cmd_config(targets, machine, compiler) -> int:
     n_ok = 0
     for name, root, subdir, style in items:
         if style == "build.py":
-            print(f"  - {name}: build.py-style package; not a Makefile target "
-                  f"(use `configme install --build-deps`); skipping")
-            continue
+            print(f"  - {name}: build.py-style; build via "
+                  f"`configme install --build-deps`")
+            if not subdir:
+                continue
+            # but still configure its makefile-template subcomponent (utils/)
+        # Display label: a build.py package's subcomponent shows as name/subdir.
+        label = f"{name}/{subdir}" if (style == "build.py" and subdir) else name
         cfgroot = root / subdir if subdir else root
         copied = generate.ensure_common(name, cfgroot)
         if copied is not None:
-            print(f"  ~ {name}: copied configme-provided common.mk -> {copied}")
+            print(f"  ~ {label}: copied configme-provided common.mk -> {copied}")
         if generate.has_common(cfgroot):
             out = generate.generate_makefile(root, machine, compiler,
                                              machine_path, compiler_path, subdir)
-            print(f"  + {name}: wrote {out}")
+            print(f"  + {label}: wrote {out}")
             n_ok += 1
         elif generate.legacy_flat_config(cfgroot, machine, compiler) is not None:
             out = generate.legacy_makefile(root, machine, compiler, subdir)
-            print(f"  + {name}: wrote {out} (LEGACY flat config — migrate to common.mk)")
+            print(f"  + {label}: wrote {out} (LEGACY flat config — migrate to common.mk)")
             n_ok += 1
         elif name == project_orch_name(project):
             out = generate.generate_makefile(root, machine, compiler,
                                              machine_path, compiler_path, subdir)
-            print(f"  + {name}: wrote {out} (no common.mk; orchestrator has no deps?)")
+            print(f"  + {label}: wrote {out} (no common.mk; orchestrator has no deps?)")
             n_ok += 1
         else:
-            print(f"  - {name}: no common.mk and no legacy config "
+            print(f"  - {label}: no common.mk and no legacy config "
                   f"'{machine}_{compiler}'; skipping")
     print(f"Done: {n_ok} Makefile(s) generated.")
     return 0
