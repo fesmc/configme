@@ -13,6 +13,8 @@ fragments, and clone/link a whole stack with one command.
 configme install yelmox    # clone + configure + link (+ build) a whole stack
 configme config yelmox     # (re)generate Makefiles for an already-present stack
 configme                   # (re)configure the current directory (orchestrator or package)
+configme show macbook      # print a machine (or compiler) fragment to copy/edit
+configme new machine mybox # scaffold a new machine fragment from linux, to edit
 configme netcdf            # detect & print NC_FROOT / NC_CROOT
 ```
 
@@ -71,6 +73,23 @@ cd yelmo && configme -m macbook -c gfortran      # bare = `configme config` on t
 
 `configme config` only (re)generates Makefiles — it never clones, links, or
 builds. Add `--dry-run` to preview which Makefiles would change.
+
+### A machine configme doesn't know yet
+
+On a new machine or cluster, give it any name you like. `configme new machine`
+scaffolds a starter fragment (seeded from `linux`) into both the project's
+`.configme/machines/` and your `~/.configme/machines/`, ready to edit:
+
+```bash
+configme new machine mybox            # creates mybox.mk in project + user tiers
+configme show macbook                 # print an existing one as a reference to copy
+configme config yelmox -m mybox -c gfortran
+```
+
+You don't even have to run `new` first: if you pass an unknown machine to
+`config`/`install` at the interactive prompt, configme offers to create it from
+`linux` on the spot. Once your fragment works well, please consider
+contributing it back to configme so others can reuse it.
 
 Run `configme --help` for the full command surface and `configme list` to see
 the supported orchestrators, packages, machines, and compilers.

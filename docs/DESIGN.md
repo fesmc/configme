@@ -100,6 +100,8 @@ freshly-cloned supported orchestrator should carry its own manifest.
 configme install <target> [options]   # clone/use-existing + configure + link + build
 configme config [<target>] [options]  # config-only: (re)generate Makefile(s)
 configme [-m M] [-c C]                # alias for `configme config` on the current dir
+configme show <name>                   # print a machine/compiler fragment to stdout
+configme new machine|compiler <name>   # scaffold a fragment from an existing one
 configme netcdf                        # detect & print NC_FROOT / NC_CROOT
 configme init                          # scaffold/validate a .configme/ folder
 configme list                          # supported packages / machines / compilers
@@ -208,10 +210,35 @@ module, or set `NC_FROOT` / `NC_CROOT`) rather than emitting a broken Makefile.
 4. hostname auto-detection (configme ships a `hostname-pattern → machine` map)
 5. interactive prompt (TTY only)
 
+The interactive prompt (step 5) is a **single combined question**: when both
+are unresolved the user types `<machine> <compiler>` as two words; when only one
+is missing it is asked alone. Available machines and compilers are listed first.
+
 The selected machine + compiler are recorded in the orchestrator's
 `.configme/config.toml` so every subsequent `configme <pkg>` inside that
 orchestrator applies the **same** pair to all components — this is what removes
 the per-package repetition that `config.py` forces today.
+
+### Authoring fragments: `show`, `new`, and the new-machine escape valve
+
+A user on a not-yet-supported machine needs their own fragment. Two helpers:
+
+- **`configme show <name>`** prints a resolved machine/compiler fragment to
+  stdout (auto-detecting the kind; `--machine`/`--compiler` to force) with an
+  origin header, so it can be read or copied into a local `.configme/`.
+- **`configme new machine <name>`** (and `new compiler`) scaffolds `<name>.mk`
+  seeded from an existing fragment (`--from`, default `linux` for machines,
+  `gfortran` for compilers). It writes the **project tier** (the primary copy,
+  intended for eventual upstreaming into configme) *and* the **user tier** (a
+  durable backup that survives deleting the project), then leaves it for the
+  user to edit. Refuses to overwrite without `--force`.
+
+**Escape valve:** if the interactive prompt receives an *unknown machine* name,
+configme offers to scaffold it from `linux` on the spot (project + user tier,
+default yes) and proceeds with it. An unknown *compiler* simply re-prompts with
+a hint to `configme new compiler` — the compiler set is small and fixed, so no
+auto-creation. During a fresh `install` (before the orchestrator is cloned)
+there is no project yet, so the escape valve writes only the user tier.
 
 ### Contribute-back nudge
 

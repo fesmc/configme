@@ -213,6 +213,62 @@ def is_locally_defined_only(kind: str, name: str) -> bool:
     return name not in shipped
 
 
+def read_fragment(kind: str, name: str,
+                  project: Optional[Project]) -> Tuple[Path, str, str]:
+    """Return (path, tier, text) for a resolved fragment — used by `show`."""
+    path, tier = resolve_fragment(kind, name, project)
+    return path, tier, path.read_text()
+
+
+def _seeded_fragment_text(kind: str, name: str, src: str, body: str) -> str:
+    """Header naming the new fragment + the seed's body (minus its own first
+    description line). The user edits this; it is a stub, not authoritative."""
+    label = "Machine" if kind == "machine" else "Compiler"
+    header = (
+        f"# {label} configuration: {name} — user-created stub, seeded from '{src}'.\n"
+        f"# Edit as needed for this {kind}; consider contributing it to configme\n"
+        f"# (https://github.com/fesmc/configme) so others can reuse it.\n"
+        "#\n"
+    )
+    lines = body.splitlines()
+    if lines and lines[0].lstrip().startswith("#"):
+        lines = lines[1:]  # drop the seed's own "<Label> configuration: <src>" line
+    rest = "\n".join(lines).lstrip("\n")
+    return header + rest + ("\n" if not rest.endswith("\n") else "")
+
+
+def create_fragment(kind: str, name: str, *, src: str,
+                    project: Optional[Project], force: bool = False) -> List[Path]:
+    """Scaffold a new machine/compiler fragment ``<name>.mk`` seeded from ``src``.
+
+    Writes the project tier (``<root>/.configme/<kind>s/``) when a project is
+    given, and always the user tier (``~/.configme/<kind>s/``) as a durable
+    backup. Refuses to overwrite existing files unless ``force``. Returns the
+    paths written."""
+    if kind not in ("machine", "compiler"):
+        raise ProjectError(f"unknown fragment kind '{kind}'")
+    _src_path, _tier = resolve_fragment(kind, src, project)  # fail-fast on bad seed
+    content = _seeded_fragment_text(kind, name, src, _src_path.read_text())
+
+    targets: List[Path] = []
+    if project is not None:
+        targets.append(_tier_dir(project.configme_dir, kind) / f"{name}.mk")
+    targets.append(_tier_dir(user_dir(), kind) / f"{name}.mk")
+
+    existing = [t for t in targets if t.is_file()]
+    if existing and not force:
+        raise ProjectError(
+            f"{kind} fragment '{name}' already exists: "
+            f"{', '.join(str(p) for p in existing)} (use --force to overwrite)")
+
+    written: List[Path] = []
+    for t in targets:
+        t.parent.mkdir(parents=True, exist_ok=True)
+        t.write_text(content)
+        written.append(t)
+    return written
+
+
 # --------------------------------------------------------------- hostname map
 
 def _hostname_map() -> Dict[str, str]:
@@ -236,14 +292,17 @@ def hostname_machine() -> Optional[str]:
 # --------------------------------------------------------------- selection
 
 def resolve_selection(machine: Optional[str], compiler: Optional[str],
-                      project: Optional[Project], prompt_fn) -> Tuple[str, str]:
+                      project: Optional[Project], select_fn) -> Tuple[str, str]:
     """Resolve machine + compiler with precedence:
 
         explicit flag > orchestrator config.toml > user config.toml
                       > hostname auto-detect (machine only) > prompt
 
-    Persists the resolved pair into the project's config.toml so later runs
-    inside the same orchestrator do not prompt again.
+    Anything still unresolved is obtained from ``select_fn(need_machine,
+    need_compiler, project)`` (a single combined prompt; see cli._select), which
+    returns the chosen values for the kinds that were needed. Persists the
+    resolved pair into the project's config.toml so later runs inside the same
+    orchestrator do not prompt again.
     """
     proj_cfg = load_config(project)
     user_cfg = load_user_config()
@@ -252,10 +311,11 @@ def resolve_selection(machine: Optional[str], compiler: Optional[str],
                or hostname_machine())
     compiler = (compiler or proj_cfg.get("compiler") or user_cfg.get("compiler"))
 
-    if not machine:
-        machine = prompt_fn("machine", available_fragments("machine", project))
-    if not compiler:
-        compiler = prompt_fn("compiler", available_fragments("compiler", project))
+    if not machine or not compiler:
+        sel_machine, sel_compiler = select_fn(
+            need_machine=not machine, need_compiler=not compiler, project=project)
+        machine = machine or sel_machine
+        compiler = compiler or sel_compiler
 
     # Persist into the orchestrator config so the choice is inherited/reused.
     if project is not None and (proj_cfg.get("machine") != machine

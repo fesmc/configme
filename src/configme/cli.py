@@ -5,6 +5,8 @@ Command surface (see docs/DESIGN.md sec. 4)::
     configme install <target> [options]   clone/use-existing + configure + link + build
     configme config [<target>] [options]  config-only: (re)generate Makefile(s)
     configme [-m M] [-c C]                alias for `configme config` on the current dir
+    configme show <name>                   print a machine/compiler fragment to stdout
+    configme new machine|compiler <name>   scaffold a fragment from an existing one
     configme netcdf                        detect & print NC_FROOT / NC_CROOT
     configme init                          scaffold/validate a .configme/ folder
     configme list                          supported packages / machines / compilers
@@ -24,7 +26,7 @@ from configme import __version__, context, data, generate, install, netcdf
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
 # configures the current orchestrator; name packages with `configme config`.
-VERBS = {"install", "config", "netcdf", "init", "list"}
+VERBS = {"install", "config", "show", "new", "netcdf", "init", "list"}
 
 
 # ----------------------------------------------------------------- not-yet-impl
@@ -71,20 +73,122 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _detect_kind(name: str, kind, project):
+    """Resolve the fragment kind for `show`: honour an explicit --machine/
+    --compiler, else auto-detect (error if the name exists in both)."""
+    if kind is not None:
+        return kind
+    in_m = name in context.available_fragments("machine", project)
+    in_c = name in context.available_fragments("compiler", project)
+    if in_m and in_c:
+        raise context.ProjectError(
+            f"'{name}' is both a machine and a compiler; disambiguate with "
+            f"--machine or --compiler.")
+    if in_m:
+        return "machine"
+    if in_c:
+        return "compiler"
+    raise context.ProjectError(
+        f"no machine or compiler named '{name}'. "
+        f"machines: {', '.join(context.available_fragments('machine', project)) or '(none)'}; "
+        f"compilers: {', '.join(context.available_fragments('compiler', project)) or '(none)'}")
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    """Print a machine/compiler fragment to stdout (with an origin header) so it
+    can be read or copied into a local .configme/."""
+    project = context.find_project(Path.cwd())
+    kind = _detect_kind(args.name, args.kind, project)
+    path, tier, text = context.read_fragment(kind, args.name, project)
+    print(f"# {kind} '{args.name}' — from {tier} tier: {path}")
+    print(text, end="" if text.endswith("\n") else "\n")
+    return 0
+
+
+def cmd_new(args: argparse.Namespace) -> int:
+    """Scaffold a new machine/compiler fragment, seeded from an existing one,
+    into the project (if any) and user tiers for the user to edit."""
+    project = context.find_project(Path.cwd())
+    src = args.src or ("linux" if args.kind == "machine" else "gfortran")
+    written = context.create_fragment(args.kind, args.name, src=src,
+                                      project=project, force=args.force)
+    for p in written:
+        print(f"  + wrote {p}")
+    if project is None:
+        print("  note: not inside a project; wrote the user-tier copy only.")
+    print(f"Edit the file(s) above for '{args.name}', then use "
+          f"-{args.kind[0]} {args.name} with `configme config`/`install`.")
+    return 0
+
+
 # ----------------------------------------------------------- stubbed verbs
 
-def _prompt_choice(label: str, options) -> str:
-    """Prompt for a value, showing available options. TTY only."""
+def _select(*, need_machine: bool, need_compiler: bool, project):
+    """Combined machine+compiler selection prompt (TTY only).
+
+    When both are needed the user types them as two words (`machine compiler`)
+    in a single question; when only one is needed it is asked alone. An unknown
+    *machine* triggers the escape valve: offer to scaffold `<name>.mk` from
+    `linux` (project + user tier) so a new machine is usable immediately. An
+    unknown *compiler* re-prompts with a hint to `configme new compiler`.
+    Returns (machine_or_None, compiler_or_None) for the kinds that were needed.
+    """
     if not sys.stdin.isatty():
         raise context.ProjectError(
-            f"no {label} given; pass --{label[:1]} / --{label} "
-            f"(available: {', '.join(options) or 'none'})"
-        )
-    print(f"Available {label}s: {', '.join(options) or '(none)'}")
+            "no machine/compiler resolved; pass -m/--machine and -c/--compiler "
+            "(or set them in .configme/config.toml). "
+            f"machines: {', '.join(context.available_fragments('machine', project)) or '(none)'}; "
+            f"compilers: {', '.join(context.available_fragments('compiler', project)) or '(none)'}")
+
+    m_opts = context.available_fragments("machine", project)
+    c_opts = context.available_fragments("compiler", project)
+    if need_machine:
+        print("Available machines:  " + (", ".join(m_opts) or "(none)"))
+    if need_compiler:
+        print("Available compilers: " + (", ".join(c_opts) or "(none)"))
+
+    machine = compiler = None
     while True:
-        ans = input(f"  {label}: ").strip()
-        if ans:
-            return ans
+        if need_machine and need_compiler:
+            parts = input("  machine compiler: ").split()
+            if len(parts) != 2:
+                print("  enter exactly two words: <machine> <compiler>")
+                continue
+            machine, compiler = parts
+        elif need_machine:
+            machine = input("  machine: ").strip()
+            if not machine:
+                continue
+        else:
+            compiler = input("  compiler: ").strip()
+            if not compiler:
+                continue
+
+        if need_machine and machine not in m_opts and not _ensure_machine(machine, project):
+            machine = None
+            continue
+        if need_compiler and compiler not in c_opts:
+            print(f"  compiler '{compiler}' is not known (available: "
+                  f"{', '.join(c_opts) or '(none)'}). To add one, run "
+                  f"`configme new compiler {compiler}` and edit it.")
+            compiler = None
+            continue
+        return machine, compiler
+
+
+def _ensure_machine(name: str, project) -> bool:
+    """Escape valve for an unknown machine: offer to scaffold it from `linux`
+    into the project (if any) and user tiers. Returns True if the machine is now
+    available (created), False to re-prompt."""
+    if not _confirm(f"machine '{name}' is not known — create "
+                    f".configme/machines/{name}.mk (and the ~/.configme copy) "
+                    f"from 'linux' to edit?", True):
+        return False
+    written = context.create_fragment("machine", name, src="linux", project=project)
+    for p in written:
+        print(f"  + wrote {p}")
+    print(f"  edit the above to match '{name}'; using it for this run.")
+    return True
 
 
 def _ask(label: str, default: "str | None" = None) -> "str | None":
@@ -157,7 +261,7 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
     project = context.find_project(root) if root.exists() else None
 
     machine, compiler = context.resolve_selection(machine, compiler, project,
-                                                  prompt_fn=_prompt_choice)
+                                                  select_fn=_select)
     machine_path, machine_tier = context.resolve_fragment("machine", machine, project)
     compiler_path, compiler_tier = context.resolve_fragment("compiler", compiler, project)
     _nudge("machine", machine, machine_tier)
@@ -310,7 +414,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         build_deps=args.build_deps,
         dry_run=args.dry_run,
         only=args.only,
-        prompt_fn=_prompt_choice,
+        select_fn=_select,
         ask_fn=_ask,
         confirm_fn=_confirm,
     )
@@ -341,6 +445,27 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser("init", help="scaffold/validate a .configme/ folder")
     p_init.set_defaults(func=cmd_init)
+
+    p_show = sub.add_parser(
+        "show", help="print a machine/compiler fragment to stdout")
+    p_show.add_argument("name", help="machine or compiler name (auto-detected)")
+    grp = p_show.add_mutually_exclusive_group()
+    grp.add_argument("--machine", dest="kind", action="store_const",
+                     const="machine", help="treat NAME as a machine")
+    grp.add_argument("--compiler", dest="kind", action="store_const",
+                     const="compiler", help="treat NAME as a compiler")
+    p_show.set_defaults(func=cmd_show, kind=None)
+
+    p_new = sub.add_parser(
+        "new", help="scaffold a new machine/compiler fragment from an existing one")
+    p_new.add_argument("kind", choices=["machine", "compiler"])
+    p_new.add_argument("name", help="name of the new fragment")
+    p_new.add_argument("--from", dest="src", default=None,
+                       help="seed fragment to copy (default: linux for machine, "
+                       "gfortran for compiler)")
+    p_new.add_argument("--force", action="store_true",
+                       help="overwrite an existing fragment")
+    p_new.set_defaults(func=cmd_new)
 
     p_config = sub.add_parser(
         "config", help="(re)generate Makefiles for already-present packages "

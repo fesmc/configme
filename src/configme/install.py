@@ -244,7 +244,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 machine: Optional[str], compiler: Optional[str],
                 overwrite: bool, build_deps: bool, dry_run: bool,
                 only: bool = False,
-                prompt_fn=None, ask_fn=None, confirm_fn=None) -> int:
+                select_fn=None, ask_fn=None, confirm_fn=None) -> int:
     cwd = Path.cwd()
     plan = build_plan(target, only=only)           # fail-fast: unknown names
     root, primary_present = root_for(plan, install_dir, cwd)
@@ -252,7 +252,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     # Resolve selection early (fail-fast on missing machine/compiler) using the
     # project at root if it already exists.
     project = context.find_project(root) if root.exists() else None
-    machine, compiler = context.resolve_selection(machine, compiler, project, prompt_fn)
+    machine, compiler = context.resolve_selection(machine, compiler, project, select_fn)
     machine_path, machine_tier = context.resolve_fragment("machine", machine, project)
     compiler_path, compiler_tier = context.resolve_fragment("compiler", compiler, project)
 
