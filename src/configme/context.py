@@ -67,26 +67,39 @@ def _load_toml(path: Path) -> dict:
         raise ProjectError(f"invalid TOML in {path}: {e}") from e
 
 
+def _manifest_primary(cwd: Path) -> Optional[str]:
+    """Return the ``package`` (primary) named by ``cwd``'s manifest, or None when
+    there is no manifest. A manifest with no ``package`` key is an error.
+
+    The manifest is the authoritative, directory-name-independent record of what
+    a checkout is (written by ``configme install``/``configme init``). ``package``
+    is resolved by name: a known orchestrator yields an orchestrator context, a
+    known package a standalone-package context."""
+    mf = cwd / ".configme" / "manifest.toml"
+    if not mf.is_file():
+        return None
+    name = _load_toml(mf).get("package")
+    if not name:
+        raise ProjectError(f"{mf}: missing top-level `package = \"...\"`")
+    if name not in data.orchestrators() and name not in data.packages():
+        raise ProjectError(
+            f"{mf}: package '{name}' is not supported by configme. Known: "
+            f"{', '.join(sorted(set(data.orchestrators()) | set(data.packages())))}")
+    return name
+
+
 def find_project(cwd: Path) -> Optional[Project]:
     """Identify the orchestrator rooted at ``cwd``.
 
-    Prefers a local ``.configme/manifest.toml`` (which names its orchestrator);
-    otherwise matches the directory name against a known orchestrator.
+    Prefers a local ``.configme/manifest.toml`` (whose ``package`` names the
+    primary); otherwise matches the directory name against a known orchestrator.
+    Returns None when ``cwd`` is a standalone package rather than an orchestrator.
     """
     orchs = data.orchestrators()
 
-    mf = cwd / ".configme" / "manifest.toml"
-    if mf.is_file():
-        manifest = _load_toml(mf)
-        name = manifest.get("orchestrator")
-        if not name:
-            raise ProjectError(f"{mf}: missing top-level `orchestrator = \"...\"`")
-        if name not in orchs:
-            raise ProjectError(
-                f"{mf}: orchestrator '{name}' is not supported by configme. "
-                f"Known: {', '.join(sorted(orchs))}"
-            )
-        return Project(orchs[name], cwd)
+    name = _manifest_primary(cwd)
+    if name is not None:
+        return Project(orchs[name], cwd) if name in orchs else None
 
     for orch in orchs.values():
         if cwd.name == orch.dir:
@@ -95,23 +108,30 @@ def find_project(cwd: Path) -> Optional[Project]:
 
 
 def find_package(cwd: Path) -> Optional[str]:
-    """Identify a standalone package rooted at ``cwd`` by directory name.
+    """Identify a standalone package rooted at ``cwd``.
 
-    Used by the bare/config-only form: run inside a single package's directory
-    (not an orchestrator), ``configme`` configures just that package."""
-    for name, pkg in data.packages().items():
+    Prefers the manifest's ``package`` (when it names a package, not an
+    orchestrator); otherwise matches the directory name against a known package.
+    Used by the bare/config-only form: run inside a single package's directory,
+    ``configme`` configures just that package."""
+    name = _manifest_primary(cwd)
+    if name is not None:
+        return name if name in data.packages() and name not in data.orchestrators() else None
+
+    for nm, pkg in data.packages().items():
         if cwd.name == pkg.dir:
-            return name
+            return nm
     return None
 
 
 def manifest_packages(project: Project) -> List[str]:
-    """Package list for the project: the local manifest if present, else the
-    orchestrator's shipped default set. Validates every entry is supported."""
+    """Dependency packages for the project: the manifest's ``deps`` if present,
+    else the orchestrator's shipped default set. Validates every entry is a
+    supported package."""
     pkgs = data.packages()
     if project.manifest_path.is_file():
         manifest = _load_toml(project.manifest_path)
-        names = list(manifest.get("packages", []))
+        names = list(manifest.get("deps", []))
         source = str(project.manifest_path)
     else:
         names = list(project.orchestrator.default_packages)
@@ -123,6 +143,64 @@ def manifest_packages(project: Project) -> List[str]:
             f"Supported: {', '.join(sorted(pkgs))}"
         )
     return names
+
+
+# ----------------------------------------------------------- manifest authoring
+
+_INSTALL_GITIGNORE = (
+    "# Written by configme. config.toml is install-local — it records this\n"
+    "# checkout's machine/compiler and install choices, so it is kept out of\n"
+    "# the package repo. manifest.toml is portable (package + deps only) and\n"
+    "# may be committed.\n"
+    "config.toml\n"
+)
+
+
+def render_manifest(package: Optional[str], deps: List[str], *,
+                    generic: bool = False) -> str:
+    """Render a ``manifest.toml`` body: ``package`` names the checkout's primary
+    (an orchestrator or a package), ``deps`` lists the packages it pulls in."""
+    deps_block = "".join(f'    "{d}",\n' for d in deps)
+    if generic:
+        known = ", ".join(sorted(set(data.orchestrators()) | set(data.packages())))
+        return (
+            "# configme manifest. Set `package` to this checkout's primary\n"
+            "# (an orchestrator or a package); list the packages it depends on\n"
+            "# in `deps`.\n"
+            f"# Known: {known}\n"
+            '# package = "yelmox"\n'
+            "deps = [\n" + deps_block + "]\n"
+        )
+    return (
+        f"# configme manifest for {package}.\n"
+        f'package = "{package}"\n'
+        "deps = [\n" + deps_block + "]\n"
+    )
+
+
+def ensure_install_gitignore(configme_dir: Path) -> None:
+    """Write ``.configme/.gitignore`` (if absent) so the install-local
+    ``config.toml`` never gets committed to a package repository. ``manifest.toml``
+    (portable: package + deps) and project-tier fragments (machines/, compilers/)
+    are left trackable."""
+    gi = configme_dir / ".gitignore"
+    if not gi.is_file():
+        gi.write_text(_INSTALL_GITIGNORE)
+
+
+def write_manifest(root: Path, package: str, deps: List[str]) -> Tuple[Path, bool]:
+    """Ensure ``<root>/.configme/manifest.toml`` exists (plus the install-local
+    ``.gitignore``), making the checkout self-describing regardless of its
+    directory name. An existing manifest — e.g. one committed to the package
+    repo — is left untouched. Returns ``(path, created)``."""
+    configme_dir = root / ".configme"
+    configme_dir.mkdir(parents=True, exist_ok=True)
+    ensure_install_gitignore(configme_dir)
+    mf = configme_dir / "manifest.toml"
+    if mf.is_file():
+        return mf, False
+    mf.write_text(render_manifest(package, deps))
+    return mf, True
 
 
 # ------------------------------------------------------------------ config.toml

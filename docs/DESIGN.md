@@ -83,14 +83,25 @@ deleted once configme is trusted as the sole tool.
 There are two orchestrators today — **yelmox** and **climber-x** — each
 compiling a different set of component packages.
 
-Each orchestrator carries a `.configme/manifest.toml` listing its packages.
-configme validates that it supports every listed package. The manifest lists
+Each checkout carries a `.configme/manifest.toml` that names what it is:
+`package = "<primary>"` (an orchestrator or a package, resolved by name) plus
+`deps = [...]`, the packages it pulls in. This makes a checkout
+**self-describing independent of its directory name** — an install into a
+differently-named directory (e.g. `--dir check`) is still recognised. configme
+validates that it supports the named package and every dep. The manifest names
 packages only; it does **not** describe per-package needs (org, link
 dependencies, config style) — configme centralises those (§10).
 
+The manifest is **portable** — `package` + `deps` only, no machine/compiler or
+install choices (those live in `config.toml`) — so it may be committed into a
+package repo. `configme install`/`configme init` therefore **create it only if
+missing**: a committed manifest is left untouched. They write a
+`.configme/.gitignore` covering `config.toml` (install-local) but not
+`manifest.toml`.
+
 **Manifest precedence:** local `.configme/manifest.toml` (if present) wins;
-otherwise configme uses its own shipped seed manifest for that orchestrator. A
-freshly-cloned supported orchestrator should carry its own manifest.
+otherwise configme falls back to directory-name matching, then its own shipped
+seed manifest for that orchestrator.
 
 ---
 
@@ -316,10 +327,14 @@ concerns:
 
 An orchestrator's `.configme/` holds:
 
-- **`manifest.toml`** — the package list (validated against configme support).
+- **`manifest.toml`** — `package` (the primary) + `deps` (validated against
+  configme support). Portable; committable. Created only if missing.
 - **`config.toml`** — resolved selections: `machine`, `compiler`, and the
   install choices (download mode, install dir, options) so re-runs are
   consistent. Also holds user/machine-specific extras values (§13).
+  Install-local; gitignored.
+- **`.gitignore`** — keeps `config.toml` out of the package repo while leaving
+  `manifest.toml` and project-tier fragments below trackable.
 - **`machines/`, `compilers/`** *(optional)* — local fragment overrides (top of
   the §6 precedence).
 

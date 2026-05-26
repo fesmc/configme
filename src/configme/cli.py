@@ -374,23 +374,6 @@ def cmd_netcdf(args: argparse.Namespace) -> int:
     return 0
 
 
-def _render_manifest(orch_name, packages_list, generic: bool) -> str:
-    pkgs = "".join(f'    "{p}",\n' for p in packages_list)
-    if generic:
-        supported = ", ".join(sorted(data.orchestrators()))
-        return (
-            "# configme manifest. Set the orchestrator and prune the package list.\n"
-            f"# Supported orchestrators: {supported}\n"
-            '# orchestrator = "yelmox"\n'
-            "packages = [\n" + pkgs + "]\n"
-        )
-    return (
-        f"# configme manifest for {orch_name}.\n"
-        f'orchestrator = "{orch_name}"\n'
-        "packages = [\n" + pkgs + "]\n"
-    )
-
-
 def cmd_init(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
     orchestrators = data.orchestrators()
@@ -399,20 +382,22 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     configme_dir = cwd / ".configme"
     configme_dir.mkdir(exist_ok=True)
+    context.ensure_install_gitignore(configme_dir)
     print(f"configme init in {cwd}")
     if orch is not None:
         print(f"  recognised orchestrator: {orch.name}")
     else:
         print("  not a recognised orchestrator directory — writing a generic "
-              "template (set `orchestrator` in manifest.toml).")
+              "template (set `package` in manifest.toml).")
 
     # --- manifest.toml: create if missing, else validate.
     mf = configme_dir / "manifest.toml"
     if not mf.is_file():
         if orch is not None:
-            mf.write_text(_render_manifest(orch.name, orch.default_packages, False))
+            mf.write_text(context.render_manifest(orch.name, orch.default_packages))
         else:
-            mf.write_text(_render_manifest(None, sorted(packages), True))
+            mf.write_text(context.render_manifest(None, sorted(packages),
+                                                  generic=True))
         print(f"  + wrote {mf}")
     else:
         print(f"  - {mf} exists; validating")

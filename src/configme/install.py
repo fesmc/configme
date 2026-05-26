@@ -297,6 +297,18 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             print(f"  ! {node.name}: {e}")
             results["failed"].append(node.name)
 
+    # --- manifest (make the checkout self-describing, independent of its dir
+    # name so e.g. `--dir check` is still recognised by a later bare `configme`)
+    deps = [n.name for n in plan.nodes if n.name != plan.primary.name]
+    runner.emit("\n# --- manifest ---")
+    runner.emit(f"mkdir -p {root}/.configme  # write .configme/manifest.toml")
+    if dry_run:
+        print(f"  manifest: (dry) would write {root}/.configme/manifest.toml "
+              f"(package={plan.primary.name}, deps={deps})")
+    elif root.exists():
+        mf, created = context.write_manifest(root, plan.primary.name, deps)
+        print(f"  + wrote {mf}" if created else f"  manifest: using existing {mf}")
+
     # --- link phase (non-primary packages only)
     runner.emit("\n# --- links ---")
     plan_names = {n.name for n in plan.nodes}
