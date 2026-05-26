@@ -13,12 +13,18 @@ Handlers:
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional, Protocol
+
+
+class _Ask(Protocol):
+    def __call__(self, label: str, default: Optional[str] = None, *,
+                 complete_paths: bool = False) -> Optional[str]: ...
 
 
 def _pip_package(value, runner, root: Path, cfg: dict, ask) -> str:
@@ -81,13 +87,16 @@ def _data_link(value, runner, root: Path, cfg: dict, ask) -> str:
     labels = value if isinstance(value, list) else [value]
     done = []
     for label in labels:
-        path = cfg.get(label) or ask(f"path to {label}")
+        path = cfg.get(label) or ask(f"path to {label}", complete_paths=True)
         runner.emit(f"# data_link {label}: ln -s <path> {label}")
         if not path:
             print(f"  data_link {label}: no path given; pending (link later)")
             done.append(f"{label}=pending")
             continue
-        target = Path(path).expanduser()
+        # Data links are stored as absolute, fully expanded paths (~ and $VARS
+        # resolved, made absolute from the filesystem root) so they stay valid
+        # regardless of where the link is later read from.
+        target = Path(os.path.expandvars(os.path.expanduser(path))).resolve()
         link_path = root / label
         runner.emit(f"ln -s {target} {label}")
         if runner.dry_run:
@@ -112,7 +121,7 @@ _HANDLERS: dict = {
 
 
 def run_extras(orchestrator, runner, root: Path, cfg: dict,
-               ask: Callable[[str], Optional[str]]) -> None:
+               ask: _Ask) -> None:
     extras = orchestrator.extras or {}
     if not extras:
         return

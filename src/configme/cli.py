@@ -19,6 +19,9 @@ Makefile-generation path (`install.configure_makefile`); `config` is the
 from __future__ import annotations
 
 import argparse
+import contextlib
+import glob
+import os
 import sys
 from pathlib import Path
 
@@ -191,15 +194,61 @@ def _ensure_machine(name: str, project) -> bool:
     return True
 
 
-def _ask(label: str, default: "str | None" = None) -> "str | None":
+@contextlib.contextmanager
+def _path_completion():
+    """Enable bash-like Tab completion of filesystem paths for the duration of
+    one ``input()`` call, restoring readline's prior state on exit.
+
+    The completer preserves whatever prefix the user typed (``~/``, ``../``,
+    ``$VAR``) and only appends the matched remainder, adding a trailing
+    separator on directories. If ``readline`` is unavailable (e.g. the build of
+    Python lacks it), this is a no-op and ``input()`` behaves normally."""
+    try:
+        import readline
+    except ImportError:
+        yield
+        return
+
+    def complete(text, state):
+        expanded = os.path.expanduser(os.path.expandvars(text))
+        matches = []
+        for m in sorted(glob.glob(expanded + "*")):
+            comp = text + m[len(expanded):]
+            if os.path.isdir(m) and not comp.endswith(os.sep):
+                comp += os.sep
+            matches.append(comp)
+        return matches[state] if state < len(matches) else None
+
+    old_completer = readline.get_completer()
+    old_delims = readline.get_completer_delims()
+    # Treat the whole path (slashes included) as one token to complete.
+    readline.set_completer_delims(" \t\n")
+    readline.set_completer(complete)
+    # macOS ships libedit under the readline name; it needs a different binding.
+    if "libedit" in (getattr(readline, "__doc__", "") or ""):
+        readline.parse_and_bind("bind ^I rl_complete")
+    else:
+        readline.parse_and_bind("tab: complete")
+    try:
+        yield
+    finally:
+        readline.set_completer(old_completer)
+        readline.set_completer_delims(old_delims)
+
+
+def _ask(label: str, default: "str | None" = None, *,
+         complete_paths: bool = False) -> "str | None":
     """Free-text prompt for extras values; returns None when non-interactive
     (so extras degrade to 'pending' rather than blocking). The default that
     applies when the user just presses Enter is always shown — '(None)' when
-    there is no default."""
+    there is no default. With ``complete_paths`` the prompt offers bash-like
+    Tab completion of filesystem paths."""
     if not sys.stdin.isatty():
         return default
     shown = default if default is not None else "None"
-    ans = input(f"  {label} ({shown}): ").strip()
+    ctx = _path_completion() if complete_paths else contextlib.nullcontext()
+    with ctx:
+        ans = input(f"  {label} ({shown}): ").strip()
     return ans or default
 
 
