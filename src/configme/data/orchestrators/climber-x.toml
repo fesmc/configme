@@ -43,9 +43,11 @@ pip_package = ["runme"]       # install the `runme` command if missing
 runme_config = true           # create/patch .runme_config (hpc/account)
 
 # CLIMBER-X input data lives in a separate GitLab repo (large files), cloned
-# into ./input. Honors the install download mode (ssh/https/no).
+# into ./input. Pinned to HTTPS: the GitLab host uses a separate login that is
+# not necessarily set up for SSH on every machine.
 [[orchestrator.extras.git_repo]]
 dir = "input"
 host = "gitlab.pik-potsdam.de"
 org = "cxesmc"
 repo = "climber-x-input"
+protocol = "https"

@@ -118,12 +118,14 @@ def _data_link(value, runner, root: Path, cfg: dict, ask) -> str:
 def _git_repo(value, runner, root: Path, cfg: dict, ask) -> str:
     """Clone one or more auxiliary git repos into named dirs under the
     orchestrator root — e.g. climber-x's ``input`` from GitLab. Each entry is a
-    table ``{dir, org, repo, host?, ref?}``; ``host`` defaults to GitHub and
-    ``ref`` (branch/tag/commit) is checked out after cloning.
+    table ``{dir, org, repo, host?, ref?, protocol?}``; ``host`` defaults to
+    GitHub and ``ref`` (branch/tag/commit) is checked out after cloning.
 
     Honors the install download mode: ``ssh``/``https`` pick the clone
-    transport, ``no`` uses whatever is already on disk. An existing dir is left
-    untouched (idempotent re-runs)."""
+    transport, ``no`` uses whatever is already on disk. A per-entry
+    ``protocol`` (``"https"``/``"ssh"``) overrides the transport for that repo
+    (handy when a host only has HTTPS login configured); ``-d no`` is never
+    overridden. An existing dir is left untouched (idempotent re-runs)."""
     # Imported lazily to avoid an install <-> extras import cycle.
     from configme.install import build_clone_url
 
@@ -143,7 +145,14 @@ def _git_repo(value, runner, root: Path, cfg: dict, ask) -> str:
             done.append("?=invalid")
             continue
         dest = root / name
-        url = build_clone_url(host, org, repo, runner.download)
+        # An entry may pin its clone transport with `protocol = "https"` / "ssh"
+        # (e.g. a repo on a host where only HTTPS login is set up), overriding
+        # the install download mode. `-d no` (use existing) is never overridden.
+        transport = runner.download
+        protocol = e.get("protocol")
+        if protocol and transport != "no":
+            transport = protocol
+        url = build_clone_url(host, org, repo, transport)
         runner.emit(f"git clone {url} {dest}")
         if ref:
             runner.emit(f"(cd {dest} && git checkout {ref})")

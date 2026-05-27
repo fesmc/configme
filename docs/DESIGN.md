@@ -436,9 +436,12 @@ Initial types (those yelmox needs today):
 - `runme_config` — create/patch `.runme_config` (hpc/account).
 - `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`).
 - `git_repo` — clone an auxiliary repo (any git host) into a named dir, e.g.
-  climber-x's `input` from GitLab. Each entry is `{dir, org, repo, host?,
-  ref?}`; `host` defaults to GitHub, `ref` is checked out after cloning, and
-  the install download mode (ssh/https/no) is honored.
+  climber-x's `input` from GitLab. Each entry is `{dir, org, repo, host?, ref?,
+  protocol?}`; `host` defaults to GitHub, `ref` is checked out after cloning,
+  and the install download mode (ssh/https/no) is honored. A per-entry
+  `protocol` (`"https"`/`"ssh"`) pins the transport for that repo (overriding
+  the download mode, e.g. a host where only HTTPS login is configured); `-d no`
+  is never overridden.
 
 User/machine-specific values (data paths, hpc/account) are prompted or read
 from `.configme/config.toml` — never shipped. climber-x reuses whichever apply
