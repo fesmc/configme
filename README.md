@@ -41,24 +41,21 @@ directory is probably not on your `PATH`. Add it to your `~/.bashrc` /
 export PATH="${PATH}:${HOME}/.local/bin"
 ```
 
-### Development install
-
-To work on configme itself, clone it and install in editable mode so changes
-take effect without reinstalling:
-
-```bash
-git clone git@github.com:fesmc/configme.git
-cd configme
-pip install -e .
-```
-
 ## Getting started
 
 ```bash
-cd yelmox                  # an orchestrator checkout
-configme init              # scaffold .configme/ (manifest + config)
-configme -m macbook -c gfortran   # configure every package in the manifest
+cd yelmox                          # an orchestrator checkout
+configme init                      # optional — only needed if the dir name is different than the package name
+configme -m macbook -c gfortran    # configure every package in the stack
 ```
+
+`configme init` scaffolds `.configme/` (a committable `manifest.toml` plus a
+`config.toml` template). It is optional: a checkout whose directory name matches
+its package name (e.g. `yelmox`) is recognised without it, and the bare command
+above creates `.configme/config.toml` for you on first run. Use `init` when the
+directory name is different than the package name (the manifest makes it
+recognisable regardless of directory name) or when you want the manifest tracked
+in git.
 
 ### Configure part of a stack
 
@@ -127,6 +124,21 @@ configme install yelmox -d clone-https
 
 Run `configme --help` for the full command surface and `configme list` to see
 the supported orchestrators, packages, machines, and compilers.
+
+## For configme developers
+
+To work on configme itself, clone it and install in editable mode so your
+changes take effect immediately, without reinstalling:
+
+```bash
+git clone git@github.com:fesmc/configme.git
+cd configme
+pip install -e .
+```
+
+With an editable (`pip install -e .`) install, the globally-available `configme`
+command always reflects your working tree, so you can iterate on the code and
+rerun commands directly — no reinstall step between edits.
 
 This repository is in early development. The full design is specified in
 [`docs/DESIGN.md`](docs/DESIGN.md).
