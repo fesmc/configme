@@ -134,8 +134,14 @@ configme install yelmox+yelmo          # exactly those two, literal, no auto-res
 
 Options (mirroring today's `install.py`):
 
-- `-d, --download {ssh|https|no}` — how to obtain repos
-  (`no` = use existing dirs/symlinks).
+- `-d, --download {ssh|https|no}` — how to obtain repos (default `ssh`):
+  - `ssh` — clone over SSH (`git@github.com:...`); needs a GitHub SSH key.
+  - `https` — clone over HTTPS (`https://github.com/...`); no SSH key needed.
+  - `no` — don't clone; configure whatever checkout is already on disk. A
+    directory only counts as a checkout if it holds the primary's Makefile
+    template (under `config/` or `.configme/`); against an empty or partial
+    directory, `-d no` fails fast rather than writing a misleading
+    `.configme/` stub.
 - `--dir DIR` — where to install (default `./<orchestrator>`, e.g. `./yelmox`).
 - `-m, --machine NAME`, `-c, --compiler NAME` — selection (see §6).
 - `--overwrite` — re-clone, moving existing copies aside.
