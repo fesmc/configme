@@ -51,7 +51,7 @@ build what needs building — all in one command.
 configme install yelmox                              # clone + configure + link (+ build) the whole stack
 configme install yelmox -m dkrz_levante -c ifx       # pick the machine + compiler explicitly
 configme install yelmox -d clone-https               # clone over HTTPS (no GitHub SSH key needed)
-configme install yelmox --dir ~/models               # clone into ~/models/yelmox instead of ./yelmox
+configme install yelmox --dir ~/models/yelmox        # put the checkout here instead of ./yelmox
 configme install yelmox --build-deps                 # rebuild dependency packages without prompting
 configme install yelmo                               # just yelmo + the sub-packages it needs
 configme install yelmo --only                        # only yelmo, nothing pulled in
