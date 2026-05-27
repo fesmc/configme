@@ -29,7 +29,8 @@ class _Ask(Protocol):
                  complete_paths: bool = False) -> Optional[str]: ...
 
 
-def _pip_package(value, runner, root: Path, cfg: dict, ask) -> str:
+def _pip_package(value, runner, root: Path, cfg: dict, ask,
+                 confirm=None, followups=None) -> str:
     names = value if isinstance(value, list) else [value]
     status = []
     for name in names:
@@ -52,7 +53,8 @@ def _pip_package(value, runner, root: Path, cfg: dict, ask) -> str:
     return ", ".join(status)
 
 
-def _runme_config(value, runner, root: Path, cfg: dict, ask) -> str:
+def _runme_config(value, runner, root: Path, cfg: dict, ask,
+                  confirm=None, followups=None) -> str:
     if not value:
         return ""
     src = root / ".runme" / "runme_config"
@@ -85,7 +87,8 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask) -> str:
     return "ok"
 
 
-def _data_link(value, runner, root: Path, cfg: dict, ask) -> str:
+def _data_link(value, runner, root: Path, cfg: dict, ask,
+               confirm=None, followups=None) -> str:
     labels = value if isinstance(value, list) else [value]
     done = []
     for label in labels:
@@ -115,7 +118,8 @@ def _data_link(value, runner, root: Path, cfg: dict, ask) -> str:
     return ", ".join(done)
 
 
-def _git_repo(value, runner, root: Path, cfg: dict, ask) -> str:
+def _git_repo(value, runner, root: Path, cfg: dict, ask,
+              confirm=None, followups=None) -> str:
     """Clone one or more auxiliary git repos into named dirs under the
     orchestrator root — e.g. climber-x's ``input`` from GitLab. Each entry is a
     table ``{dir, org, repo, host?, ref?, protocol?}``; ``host`` defaults to
@@ -125,7 +129,12 @@ def _git_repo(value, runner, root: Path, cfg: dict, ask) -> str:
     transport, ``no`` uses whatever is already on disk. A per-entry
     ``protocol`` (``"https"``/``"ssh"``) overrides the transport for that repo
     (handy when a host only has HTTPS login configured); ``-d no`` is never
-    overridden. An existing dir is left untouched (idempotent re-runs)."""
+    overridden. An existing dir is left untouched (idempotent re-runs).
+
+    These repos can be large/slow, so before each fresh clone the user is asked
+    (``confirm``, default **no**); declining defers it — the clone command is
+    printed and appended to ``followups`` so it surfaces in the install summary.
+    Non-interactive runs take the default (skip)."""
     # Imported lazily to avoid an install <-> extras import cycle.
     from configme.install import build_clone_url
 
@@ -174,6 +183,20 @@ def _git_repo(value, runner, root: Path, cfg: dict, ask) -> str:
             print(f"  git_repo {name}: {dest} exists; skipping")
             done.append(f"{name}=exists")
             continue
+        # A fresh clone of a (potentially large) repo: ask first, default skip.
+        # Declining defers it — show the command now and add it to the summary.
+        if confirm is not None and not confirm(
+                f"Download {name} now? (large repo, can take a while)", False):
+            cmds = [f"git clone {url} {dest}"]
+            if ref:
+                cmds.append(f"(cd {dest} && git checkout {ref})")
+            print(f"  - git_repo {name}: skipped; clone it later with:")
+            for c in cmds:
+                print(f"      {c}")
+            if followups is not None:
+                followups.extend(cmds)
+            done.append(f"{name}=skipped")
+            continue
         print(f"  git_repo {name}: cloning {url} -> {dest}")
         try:
             subprocess.run(["git", "clone", url, str(dest)], check=True)
@@ -195,10 +218,14 @@ _HANDLERS: dict = {
 
 
 def run_extras(orchestrator, runner, root: Path, cfg: dict,
-               ask: _Ask) -> None:
+               ask: _Ask, confirm=None) -> list:
+    """Run the orchestrator's typed extras. Returns a list of follow-up shell
+    commands for steps the user deferred (e.g. a declined ``git_repo`` clone),
+    so the caller can echo them in the install summary."""
+    followups: list = []
     extras = orchestrator.extras or {}
     if not extras:
-        return
+        return followups
     runner.emit("\n# --- extras ---")
     print("Extras:")
     for name, value in extras.items():
@@ -206,4 +233,5 @@ def run_extras(orchestrator, runner, root: Path, cfg: dict,
         if handler is None:
             print(f"  ! unknown extra '{name}' (skipping)")
             continue
-        handler(value, runner, root, cfg, ask)
+        handler(value, runner, root, cfg, ask, confirm, followups)
+    return followups

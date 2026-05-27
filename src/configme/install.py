@@ -607,11 +607,13 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                                 confirm_fn, results)
 
     # --- extras (orchestrator post-config steps)
+    followups: List[str] = []
     if plan.orchestrator is not None and plan.orchestrator.extras:
         proj = context.find_project(root) if root.exists() else None
         cfg = context.load_config(proj) if proj else {}
         ask = ask_fn or (lambda label, default=None, *, complete_paths=False: default)
-        extras_mod.run_extras(plan.orchestrator, runner, root, cfg, ask)
+        followups = extras_mod.run_extras(plan.orchestrator, runner, root, cfg,
+                                          ask, confirm_fn)
 
     # --- reproducibility log
     install_sh = root / ".install.sh"
@@ -632,6 +634,10 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 "deferred", "skipped", "unavailable", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
+    if followups:
+        print("\nDeferred — run these when ready:")
+        for cmd in followups:
+            print(f"  {cmd}")
     return 1 if results["failed"] else 0
 
 

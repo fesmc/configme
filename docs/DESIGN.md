@@ -441,7 +441,9 @@ Initial types (those yelmox needs today):
   and the install download mode (ssh/https/no) is honored. A per-entry
   `protocol` (`"https"`/`"ssh"`) pins the transport for that repo (overriding
   the download mode, e.g. a host where only HTTPS login is configured); `-d no`
-  is never overridden.
+  is never overridden. Because these repos can be large, each fresh clone is
+  confirmed first (default **skip**); a declined clone is deferred and its
+  command echoed in the install summary.
 
 User/machine-specific values (data paths, hpc/account) are prompted or read
 from `.configme/config.toml` — never shipped. climber-x reuses whichever apply
