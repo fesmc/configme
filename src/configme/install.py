@@ -375,8 +375,8 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     print(f"  packages: {', '.join(n.name for n in plan.nodes)}"
           f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
 
-    results = {"cloned": [], "configured": [], "linked": [],
-               "pending": [], "skipped": [], "failed": []}
+    results = {"cloned": [], "configured": [], "built": [], "linked": [],
+               "pending": [], "deferred": [], "skipped": [], "failed": []}
 
     # --- clone phase
     runner.emit("\n# --- clone ---")
@@ -470,8 +470,11 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     for node in plan.nodes:
         dest = dest_of(node, plan, root)
         if node.config_style == "build.py":
+            # _emit_build_py records its own outcome (built / deferred / failed)
+            # in results, so the parent node's status reflects what actually
+            # happened rather than the --build-deps flag.
             _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                           info, confirm_fn)
+                           info, results, confirm_fn)
             # A build.py package may also expose a makefile-template config
             # subdir that configme generates directly. (fesm-utils instead now
             # carries its utils component as a separate subpackage.)
@@ -481,8 +484,6 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 configure_makefile(label=label, pkg_name=node.name, dest=dest,
                                     config_subdir=node.config_subdir,
                                     is_orchestrator=False, **common_kw)
-            else:
-                results["skipped" if not build_deps else "configured"].append(node.name)
             continue
         runner.emit(f"(cd {dest} && configme config {node.name} "
                     f"-m {machine} -c {compiler})")
@@ -517,7 +518,8 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
 
     # --- summary
     print("\nSummary:")
-    for key in ("configured", "linked", "skipped", "pending", "failed"):
+    for key in ("configured", "built", "linked", "pending",
+                "deferred", "skipped", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
     return 1 if results["failed"] else 0
@@ -574,8 +576,8 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     print(f"  packages: {', '.join(n.name for n in plan.nodes)}"
           f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
 
-    results = {"updated": [], "configured": [], "missing": [],
-               "skipped": [], "failed": []}
+    results = {"updated": [], "configured": [], "built": [], "missing": [],
+               "deferred": [], "skipped": [], "failed": []}
 
     # --- pull phase (each checkout in place; a subpackage rides its parent's
     # checkout, so it has no separate pull but inherits the parent's updated flag)
@@ -626,7 +628,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
                                     is_orchestrator=False, **common_kw)
             if was_updated:
                 _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                               info, confirm_fn)
+                               info, results, confirm_fn)
             elif dest.is_dir():
                 print(f"  - {node.name}: unchanged; skipping rebuild")
             continue
@@ -658,20 +660,25 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
 
     # --- summary
     print("\nSummary:")
-    for key in ("updated", "configured", "missing", "skipped", "failed"):
+    for key in ("updated", "configured", "built", "missing",
+                "deferred", "skipped", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
     return 1 if results["failed"] else 0
 
 
 def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
-                   confirm_fn=None):
+                   results, confirm_fn=None):
     """fesm-utils-style package: print/run its build.py (see issue #7).
 
     The build runs autotools and is slow (~10-30 min), so it is not run
     unconditionally. ``--build-deps`` forces it; otherwise, on an interactive
     run, the user is asked (default yes). Dry runs and non-interactive sessions
     without ``--build-deps`` only print the command to run later.
+
+    Records the actual outcome in ``results``: ``deferred`` when the build is
+    not run (dry run, missing checkout, or the user declined), ``built`` on
+    success, ``failed`` on a build error.
     """
     nc_env = ""
     if info is not None and info.nc_froot and info.nc_croot:
@@ -683,6 +690,7 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
     if runner.dry_run or not dest.is_dir():
         print(f"  - {node.name}: build.py-style; run when ready:")
         print(f"      (cd {dest} && {cmd})")
+        results["deferred"].append(node.name)
         return
 
     do_build = build_deps
@@ -694,6 +702,7 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
     if not do_build:
         print(f"  - {node.name}: build.py-style; run when ready:")
         print(f"      (cd {dest} && {cmd})")
+        results["deferred"].append(node.name)
         return
 
     print(f"  building {node.name}: {cmd}")
@@ -705,8 +714,10 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
         subprocess.run(["./build.py", "--variant", "both",
                         "-m", machine, "-c", compiler],
                        cwd=dest, check=True, env=env)
+        results["built"].append(node.name)
     except (subprocess.CalledProcessError, OSError) as e:
         print(f"  ! {node.name} build failed: {e}")
+        results["failed"].append(node.name)
 
 
 def _build_make_package(runner, node, dest, build_deps, confirm_fn, results):
@@ -727,6 +738,7 @@ def _build_make_package(runner, node, dest, build_deps, confirm_fn, results):
         print(f"  - {node.name}: {reason}; build when ready:")
         for _, cmd in cmds:
             print(f"      (cd {dest} && {cmd})")
+        results["deferred"].append(node.name)
 
     if runner.dry_run or not dest.is_dir():
         _defer("configured")
@@ -745,6 +757,7 @@ def _build_make_package(runner, node, dest, build_deps, confirm_fn, results):
         try:
             subprocess.run(["make", f"openmp={spec.openmp_flag(variant)}",
                             spec.make_target], cwd=dest, check=True)
+            results["built"].append(f"{node.name} ({variant})")
         except (subprocess.CalledProcessError, OSError) as e:
             print(f"  ! {node.name} build failed: {e}")
             results["failed"].append(f"{node.name} ({variant})")
