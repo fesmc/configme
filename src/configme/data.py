@@ -41,6 +41,17 @@ class DataError(Exception):
     """Raised when a shipped (or local) data file is missing or malformed."""
 
 
+def split_ref(spec: str) -> "tuple[str, Optional[str]]":
+    """Split a ``name:ref`` package spec into ``(name, ref)``.
+
+    A component may pin a git ref (branch, tag, or commit) with a trailing
+    ``:ref`` — e.g. ``yelmo:climber-x`` clones yelmo and checks out its
+    ``climber-x`` branch. ``ref`` is ``None`` when no ``:`` is present (the
+    repository's default branch is used)."""
+    name, sep, ref = spec.partition(":")
+    return (name, ref or None) if sep else (name, None)
+
+
 def _load_toml(path: Path) -> dict:
     try:
         with open(path, "rb") as f:
@@ -104,6 +115,9 @@ class Package:
     repo: str
     dir: str
     config_style: str  # primary (behavioural): "makefile-template" | "build.py"
+    # Git host the repo is cloned from (default GitHub). Lets a component live on
+    # another host (e.g. a GitLab-hosted input repo) without special-casing.
+    host: str = "github.com"
     config_subdir: str = ""  # e.g. fesm-utils keeps its config under utils/
     links: List[Link] = field(default_factory=list)
     # Optional informational list of all config styles a package exposes, for
@@ -119,6 +133,13 @@ class Package:
     subpackages: List[str] = field(default_factory=list)
     # If set, configme builds this package via `make` after configuring it.
     build: "Optional[BuildSpec]" = None
+    # True for an optional component (often private): a clone failure — e.g. no
+    # access to a private repo — is a soft skip recorded in the summary, never a
+    # hard install failure. (See climber-x's bgc/vilma.)
+    optional: bool = False
+    # If True, run `git submodule update --init --recursive` after cloning
+    # (e.g. bgc carries the M4AGO submodule).
+    submodules: bool = False
 
     @classmethod
     def from_file(cls, path: Path) -> "Package":
@@ -136,12 +157,15 @@ class Package:
                 repo=pkg["repo"],
                 dir=pkg.get("dir", pkg["name"]),
                 config_style=style,
+                host=pkg.get("host", "github.com"),
                 config_subdir=pkg.get("config_subdir", ""),
                 links=links,
                 config_styles=list(pkg.get("config_styles", [])) or [style],
                 clone=bool(pkg.get("clone", True)),
                 subpackages=list(pkg.get("subpackages", [])),
                 build=BuildSpec.from_dict(build, path) if build else None,
+                optional=bool(pkg.get("optional", False)),
+                submodules=bool(pkg.get("submodules", False)),
             )
         except KeyError as e:
             raise DataError(f"{path}: [package] missing required key {e}") from e
@@ -154,7 +178,19 @@ class Orchestrator:
     repo: str
     dir: str
     config_style: str
+    host: str = "github.com"
+    # Component names in build order, with any ``:ref`` already stripped off
+    # (the ref lives in ``component_refs``). Keeping this a plain list of names
+    # means every existing consumer — manifest writing, validation, display —
+    # works unchanged.
     default_packages: List[str] = field(default_factory=list)
+    # Optional components attempted on install but allowed to fail softly (e.g.
+    # private repos a given user may not have access to: climber-x's bgc/vilma).
+    # Same ``name:ref`` syntax as default_packages.
+    optional_packages: List[str] = field(default_factory=list)
+    # name -> git ref (branch/tag/commit) for components that pin one, parsed
+    # from ``default_packages`` / ``optional_packages`` entries (``name:ref``).
+    component_refs: Dict[str, str] = field(default_factory=dict)
     extras: dict = field(default_factory=dict)
     links: List[Link] = field(default_factory=list)
     # Optional per-orchestrator override of where each component lives, relative
@@ -172,6 +208,22 @@ class Orchestrator:
         if orch is None:
             raise DataError(f"{path}: missing [orchestrator] table")
         links = [Link.from_dict(d, path) for d in orch.get("links", [])]
+        # default_packages entries may carry a ``:ref`` (e.g. "yelmo:climber-x").
+        # Split each into a bare name (kept in default_packages) and an optional
+        # ref (collected in component_refs).
+        refs: Dict[str, str] = {}
+
+        def _split(specs):
+            out = []
+            for spec in specs:
+                name, ref = split_ref(spec)
+                out.append(name)
+                if ref:
+                    refs[name] = ref
+            return out
+
+        names = _split(orch.get("default_packages", []))
+        optional = _split(orch.get("optional_packages", []))
         try:
             return cls(
                 name=orch["name"],
@@ -179,7 +231,10 @@ class Orchestrator:
                 repo=orch["repo"],
                 dir=orch.get("dir", orch["name"]),
                 config_style=orch.get("config_style", "makefile-template"),
-                default_packages=list(orch.get("default_packages", [])),
+                host=orch.get("host", "github.com"),
+                default_packages=names,
+                optional_packages=optional,
+                component_refs=refs,
                 extras=dict(orch.get("extras", {})),
                 links=links,
                 component_paths=dict(orch.get("component_paths", {})),

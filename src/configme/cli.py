@@ -352,6 +352,9 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
                      compiler_path=compiler_path, dry_run=dry_run, results=results)
     for node in plan.nodes:
         dest = install.dest_of(node, plan, root)
+        if node.config_style == "none":
+            # Clone-only component (e.g. vilma/bgc): nothing to (re)generate.
+            continue
         if node.config_style == "build.py":
             # The autotools build is a separate, slow step owned by `install`;
             # `config` only (re)generates the makefile-template subcomponent.

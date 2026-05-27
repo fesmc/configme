@@ -43,6 +43,16 @@ class Node:
     clone: bool = True
     subpackages: list = field(default_factory=list)
     build: "Optional[data.BuildSpec]" = None
+    # Git host to clone from (default GitHub) and an optional ref (branch/tag/
+    # commit) to check out right after cloning. ``ref`` is set for orchestrator
+    # components that pin one (e.g. climber-x's yelmo -> ``climber-x`` branch).
+    host: str = "github.com"
+    ref: Optional[str] = None
+    # Optional component: a clone failure is a soft skip (recorded as
+    # "unavailable"), not a hard install failure. ``submodules`` runs
+    # `git submodule update --init --recursive` after cloning.
+    optional: bool = False
+    submodules: bool = False
     # For a subpackage node: the parent package name and the path relative to the
     # parent's dest (so its location follows the parent under any orchestrator).
     parent: Optional[str] = None
@@ -59,17 +69,29 @@ class Plan:
 
 # --------------------------------------------------------------- plan building
 
+def build_clone_url(host: str, org: str, repo: str, download: str) -> str:
+    """Build a git clone URL for ``org/repo`` on ``host``. ``download`` selects
+    the transport: ``https`` -> ``https://<host>/<org>/<repo>.git``, anything
+    else (ssh) -> ``git@<host>:<org>/<repo>.git``. Host-agnostic so GitHub,
+    GitLab, etc. all work from the same registry data."""
+    if download == "https":
+        return f"https://{host}/{org}/{repo}.git"
+    return f"git@{host}:{org}/{repo}.git"
+
+
 def _node_for(name: str) -> Node:
     orchs = data.orchestrators()
     pkgs = data.packages()
     if name in orchs:
         o = orchs[name]
-        return Node(o.name, o.org, o.repo, o.dir, o.config_style, "", [], True)
+        return Node(o.name, o.org, o.repo, o.dir, o.config_style, "", [], True,
+                    host=o.host)
     if name in pkgs:
         p = pkgs[name]
         return Node(p.name, p.org, p.repo, p.dir, p.config_style,
                     p.config_subdir, p.links, False,
-                    clone=p.clone, subpackages=p.subpackages, build=p.build)
+                    clone=p.clone, subpackages=p.subpackages, build=p.build,
+                    host=p.host, optional=p.optional, submodules=p.submodules)
     known = sorted(set(orchs) | set(pkgs))
     raise InstallError(f"unknown target '{name}'. Supported: {', '.join(known)}")
 
@@ -114,6 +136,19 @@ def _resolve_deps(name: str, pkgs: Dict[str, data.Package],
         seen.append(name)
 
 
+def _apply_component_refs(nodes: List[Node],
+                          orch: "Optional[data.Orchestrator]") -> None:
+    """Stamp each node with the git ref its orchestrator pins for it (if any),
+    so the clone phase checks it out. A ref attaches to the component's own
+    checkout, never to a subpackage (which rides its parent's checkout)."""
+    if orch is None or not orch.component_refs:
+        return
+    for n in nodes:
+        ref = orch.component_refs.get(n.name)
+        if ref and n.clone:
+            n.ref = ref
+
+
 def build_plan(target: str, *, only: bool = False) -> Plan:
     """Resolve a target string into an ordered install/config Plan.
 
@@ -132,8 +167,9 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         nodes = [_node_for(n) for n in names]
         primary = next((n for n in nodes if n.is_orchestrator), nodes[0])
         orch = orchs.get(primary.name) if primary.is_orchestrator else None
-        return Plan(primary, _with_subpackages(nodes), explicit=True,
-                    orchestrator=orch)
+        expanded = _with_subpackages(nodes)
+        _apply_component_refs(expanded, orch)
+        return Plan(primary, expanded, explicit=True, orchestrator=orch)
 
     primary = _node_for(target)
 
@@ -151,9 +187,24 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         # components (resolve each component's own deps too), then orchestrator
         for comp in orch.default_packages:
             _resolve_deps(comp, pkgs, order)
-        nodes = [_node_for(n) for n in order] + [primary]
-        return Plan(primary, _with_subpackages(nodes), explicit=False,
-                    orchestrator=orch)
+        # Optional components (e.g. private bgc/vilma): resolved after the
+        # required set, deduped against it, and flagged so a clone failure is a
+        # soft skip rather than a hard failure.
+        opt_order: List[str] = []
+        for comp in orch.optional_packages:
+            _resolve_deps(comp, pkgs, opt_order)
+        opt_only = [n for n in opt_order if n not in order]
+        comp_nodes = [_node_for(n) for n in order]
+        opt_names = set(orch.optional_packages)
+        for n in opt_only:
+            node = _node_for(n)
+            if n in opt_names:
+                node.optional = True
+            comp_nodes.append(node)
+        nodes = comp_nodes + [primary]
+        expanded = _with_subpackages(nodes)
+        _apply_component_refs(expanded, orch)
+        return Plan(primary, expanded, explicit=False, orchestrator=orch)
 
     # single package: its deps (auto) then itself
     order: List[str] = []
@@ -199,12 +250,11 @@ class Runner:
         self.log.append(line)
 
     def clone_url(self, node: Node) -> str:
-        if self.download == "https":
-            return f"https://github.com/{node.org}/{node.repo}.git"
-        return f"git@github.com:{node.org}/{node.repo}.git"
+        return build_clone_url(node.host, node.org, node.repo, self.download)
 
     def clone(self, node: Node, dest: Path) -> str:
-        """Returns a status string: cloned | exists | present(no) | dry."""
+        """Clone ``node`` to ``dest`` and, if it pins a ref, check it out.
+        Returns a status string: cloned | exists | present(no) | dry."""
         if self.download == "no":
             if not (dest.exists() or dest.is_symlink()):
                 raise InstallError(
@@ -219,11 +269,20 @@ class Runner:
             shutil.move(str(dest), str(outdated / dest.name))
 
         self.emit(f"git clone {url} {dest}")
+        if node.ref:
+            self.emit(f"(cd {dest} && git checkout {node.ref})")
+        if node.submodules:
+            self.emit(f"(cd {dest} && git submodule update --init --recursive)")
         if self.dry_run:
             return "dry"
         if dest.exists() and not self.overwrite:
             return "exists"
         subprocess.run(["git", "clone", url, str(dest)], check=True)
+        if node.ref:
+            subprocess.run(["git", "checkout", node.ref], cwd=dest, check=True)
+        if node.submodules:
+            subprocess.run(["git", "submodule", "update", "--init", "--recursive"],
+                           cwd=dest, check=True)
         return "cloned"
 
     def pull(self, node: "Node", dest: Path) -> Tuple[str, bool]:
@@ -400,7 +459,8 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
           f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
 
     results = {"cloned": [], "configured": [], "built": [], "linked": [],
-               "pending": [], "deferred": [], "skipped": [], "failed": []}
+               "pending": [], "deferred": [], "skipped": [],
+               "unavailable": [], "failed": []}
 
     # --- clone phase
     runner.emit("\n# --- clone ---")
@@ -421,7 +481,8 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     else:
         try:
             st = runner.clone(plan.primary, root)
-            print(f"  clone {plan.primary.name}: {st}")
+            ref_note = f" (ref {plan.primary.ref})" if plan.primary.ref else ""
+            print(f"  clone {plan.primary.name}: {st}{ref_note}")
         except (InstallError, subprocess.CalledProcessError) as e:
             print(f"  ! {plan.primary.name}: {e}")
             results["failed"].append(plan.primary.name)
@@ -437,10 +498,17 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         dest = dest_of(node, plan, root)
         try:
             st = runner.clone(node, dest)
-            print(f"  clone {node.name}: {st}")
+            ref_note = f" (ref {node.ref})" if node.ref else ""
+            print(f"  clone {node.name}: {st}{ref_note}")
         except (InstallError, subprocess.CalledProcessError) as e:
-            print(f"  ! {node.name}: {e}")
-            results["failed"].append(node.name)
+            if node.optional:
+                # Optional component (often a private repo): no access just means
+                # this build variant is unavailable — note it and carry on.
+                print(f"  - {node.name}: optional; not cloned ({e}); skipping")
+                results["unavailable"].append(node.name)
+            else:
+                print(f"  ! {node.name}: {e}")
+                results["failed"].append(node.name)
 
     # --- manifest (make the checkout self-describing, independent of its dir
     # name so e.g. `--dir check` is still recognised by a later bare `configme`)
@@ -503,6 +571,14 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                      compiler_path=compiler_path, dry_run=dry_run, results=results)
     for node in plan.nodes:
         dest = dest_of(node, plan, root)
+        if node.config_style == "none":
+            # Clone-only component (e.g. vilma, bgc): configme places it but does
+            # not generate a Makefile for it (it is built by the orchestrator, or
+            # ships a prebuilt library).
+            runner.emit(f"# {node.name}: clone-only (configme does not configure it)")
+            if not dry_run and dest.is_dir():
+                print(f"  - {node.name}: clone-only; no configuration")
+            continue
         if node.config_style == "build.py":
             # _emit_build_py records its own outcome (built / deferred / failed)
             # in results, so the parent node's status reflects what actually
@@ -553,7 +629,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     # --- summary
     print("\nSummary:")
     for key in ("configured", "built", "linked", "pending",
-                "deferred", "skipped", "failed"):
+                "deferred", "skipped", "unavailable", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
     return 1 if results["failed"] else 0
@@ -652,6 +728,10 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
         # is the parent's pull result.
         owner = node.name if node.clone else (node.parent or node.name)
         was_updated = updated.get(owner, False)
+
+        if node.config_style == "none":
+            runner.emit(f"# {node.name}: clone-only (configme does not configure it)")
+            continue
 
         if node.config_style == "build.py":
             if node.config_subdir:

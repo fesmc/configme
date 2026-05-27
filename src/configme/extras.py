@@ -9,6 +9,8 @@ Handlers:
     pip_package = ["runme", ...]   install a command via pip if missing
     runme_config = true            create/patch .runme_config (hpc/account)
     data_link = ["ice_data", ...]  symlink runtime data dirs
+    git_repo = [{dir, org, repo, host?, ref?}, ...]
+                                   clone an auxiliary repo (any host) into a dir
 """
 
 from __future__ import annotations
@@ -113,10 +115,73 @@ def _data_link(value, runner, root: Path, cfg: dict, ask) -> str:
     return ", ".join(done)
 
 
+def _git_repo(value, runner, root: Path, cfg: dict, ask) -> str:
+    """Clone one or more auxiliary git repos into named dirs under the
+    orchestrator root — e.g. climber-x's ``input`` from GitLab. Each entry is a
+    table ``{dir, org, repo, host?, ref?}``; ``host`` defaults to GitHub and
+    ``ref`` (branch/tag/commit) is checked out after cloning.
+
+    Honors the install download mode: ``ssh``/``https`` pick the clone
+    transport, ``no`` uses whatever is already on disk. An existing dir is left
+    untouched (idempotent re-runs)."""
+    # Imported lazily to avoid an install <-> extras import cycle.
+    from configme.install import build_clone_url
+
+    entries = value if isinstance(value, list) else [value]
+    done = []
+    for e in entries:
+        if not isinstance(e, dict):
+            print(f"  ! git_repo: entry is not a table: {e!r}; skipping")
+            continue
+        name = e.get("dir")
+        org = e.get("org")
+        repo = e.get("repo")
+        host = e.get("host", "github.com")
+        ref = e.get("ref")
+        if not (name and org and repo):
+            print(f"  ! git_repo: entry missing dir/org/repo: {e}; skipping")
+            done.append("?=invalid")
+            continue
+        dest = root / name
+        url = build_clone_url(host, org, repo, runner.download)
+        runner.emit(f"git clone {url} {dest}")
+        if ref:
+            runner.emit(f"(cd {dest} && git checkout {ref})")
+
+        if runner.download == "no":
+            if dest.exists() or dest.is_symlink():
+                print(f"  git_repo {name}: -d no; using existing {dest}")
+                done.append(f"{name}=present")
+            else:
+                print(f"  ! git_repo {name}: -d no but {dest} missing; pending")
+                done.append(f"{name}=pending")
+            continue
+        if runner.dry_run:
+            print(f"  git_repo {name}: (dry) clone {url} -> {dest}"
+                  f"{f' @ {ref}' if ref else ''}")
+            done.append(f"{name}=dry")
+            continue
+        if dest.exists() or dest.is_symlink():
+            print(f"  git_repo {name}: {dest} exists; skipping")
+            done.append(f"{name}=exists")
+            continue
+        print(f"  git_repo {name}: cloning {url} -> {dest}")
+        try:
+            subprocess.run(["git", "clone", url, str(dest)], check=True)
+            if ref:
+                subprocess.run(["git", "checkout", ref], cwd=dest, check=True)
+            done.append(f"{name}=cloned")
+        except (subprocess.CalledProcessError, OSError) as exc:
+            print(f"  ! git_repo {name} clone failed: {exc}")
+            done.append(f"{name}=failed")
+    return ", ".join(done)
+
+
 _HANDLERS: dict = {
     "pip_package": _pip_package,
     "runme_config": _runme_config,
     "data_link": _data_link,
+    "git_repo": _git_repo,
 }
 
 
