@@ -11,6 +11,7 @@ fragments, and clone/link a whole stack with one command.
 
 ```bash
 configme install yelmox    # clone + configure + link (+ build) a whole stack
+configme upgrade yelmox    # git pull the stack + reconfigure (+ rebuild if changed)
 configme config yelmox     # (re)generate Makefiles for an already-present stack
 configme                   # (re)configure the current directory (orchestrator or package)
 configme show macbook      # print a machine (or compiler) fragment to copy/edit
@@ -74,6 +75,29 @@ cd yelmo && configme -m macbook -c gfortran      # bare = `configme config` on t
 `configme config` only (re)generates Makefiles — it never clones, links, or
 builds. Add `--dry-run` to preview which Makefiles would change.
 
+### Upgrade an installed stack
+
+`configme upgrade` pulls new versions of already-installed checkouts and
+reconfigures them with the same machine/compiler you installed with (read from
+`.configme/config.toml`; override with `-m`/`-c`). It shares the target grammar
+with `install`/`config`:
+
+```bash
+configme upgrade            # the current checkout's primary + its deps
+configme upgrade yelmox     # the whole yelmox stack
+configme upgrade yelmo      # yelmo + the sub-packages it needs
+configme upgrade yelmo --only   # just yelmo, nothing pulled in
+```
+
+Each checkout is updated in place with `git pull --ff-only` on whatever branch
+is checked out. A checkout that is missing, has uncommitted changes, or whose
+branch has diverged from upstream is **skipped with a warning and never
+touched** — resolve those by hand (anything beyond a clean fast-forward is left
+to you). Every package is then reconfigured; a package whose pull brought in new
+commits is also rebuilt when it is a build-it package (e.g. `fesm-utils`), gated
+exactly like `install` — `--build-deps` rebuilds without asking, otherwise you
+are prompted. Add `--dry-run` to preview the pulls and reconfigures.
+
 ### A machine configme doesn't know yet
 
 On a new machine or cluster, give it any name you like. `configme new machine`
@@ -90,6 +114,16 @@ You don't even have to run `new` first: if you pass an unknown machine to
 `config`/`install` at the interactive prompt, configme offers to create it from
 `linux` on the spot. Once your fragment works well, please consider
 contributing it back to configme so others can reuse it.
+
+### Cloning without a GitHub SSH key
+
+`configme install` clones over SSH (`git@github.com:...`) by default, which
+needs a GitHub SSH key. On a machine where you haven't set one up (e.g. a fresh
+HPC account), use `-d clone-https` to clone over HTTPS instead:
+
+```bash
+configme install yelmox -d clone-https
+```
 
 Run `configme --help` for the full command surface and `configme list` to see
 the supported orchestrators, packages, machines, and compilers.

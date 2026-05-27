@@ -3,6 +3,7 @@
 Command surface (see docs/DESIGN.md sec. 4)::
 
     configme install <target> [options]   clone/use-existing + configure + link + build
+    configme upgrade [<target>] [options] git pull + reconfigure (+ rebuild if changed)
     configme config [<target>] [options]  config-only: (re)generate Makefile(s)
     configme [-m M] [-c C]                alias for `configme config` on the current dir
     configme show <name>                   print a machine/compiler fragment to stdout
@@ -29,7 +30,7 @@ from configme import __version__, context, data, generate, install, netcdf
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
 # configures the current orchestrator; name packages with `configme config`.
-VERBS = {"install", "config", "show", "new", "netcdf", "init", "list"}
+VERBS = {"install", "upgrade", "config", "show", "new", "netcdf", "init", "list"}
 
 
 # ----------------------------------------------------------------- not-yet-impl
@@ -477,6 +478,24 @@ def cmd_install(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_upgrade(args: argparse.Namespace) -> int:
+    """`configme upgrade [target]` — git pull existing checkouts + reconfigure
+    with the same machine/compiler as before. With no target, upgrades the
+    current checkout's primary (orchestrator or package) + its deps."""
+    target = args.target or _bare_target(Path.cwd())
+    return install.run_upgrade(
+        target,
+        install_dir=args.install_dir,
+        machine=args.machine,
+        compiler=args.compiler,
+        build_deps=args.build_deps,
+        dry_run=args.dry_run,
+        only=args.only,
+        select_fn=_select,
+        confirm_fn=_confirm,
+    )
+
+
 # ----------------------------------------------------------------- parser
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -557,6 +576,24 @@ def _build_parser() -> argparse.ArgumentParser:
     p_install.add_argument("--build-deps", action="store_true")
     p_install.add_argument("--dry-run", action="store_true")
     p_install.set_defaults(func=cmd_install)
+
+    p_upgrade = sub.add_parser(
+        "upgrade", help="git pull existing checkouts + reconfigure "
+        "(and rebuild any that changed)")
+    p_upgrade.add_argument(
+        "target", nargs="?", default=None,
+        help="orchestrator, package, or '+'-joined literal list "
+        "(e.g. yelmox, yelmo, yelmox+yelmo). Default: the current directory.")
+    p_upgrade.add_argument("-m", "--machine", default=None)
+    p_upgrade.add_argument("-c", "--compiler", default=None)
+    p_upgrade.add_argument("--dir", dest="install_dir", default=None)
+    p_upgrade.add_argument("--only", action="store_true",
+                           help="upgrade only the named target — do not expand "
+                           "an orchestrator to its subpackages or pull deps")
+    p_upgrade.add_argument("--build-deps", action="store_true",
+                           help="rebuild updated packages without prompting")
+    p_upgrade.add_argument("--dry-run", action="store_true")
+    p_upgrade.set_defaults(func=cmd_upgrade)
 
     return parser
 

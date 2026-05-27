@@ -165,11 +165,34 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
 
 # --------------------------------------------------------------- runner
 
+def _git_head(dest: Path) -> Optional[str]:
+    """Current commit of the checkout at ``dest`` (None if not a git repo)."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=dest,
+                             check=True, capture_output=True, text=True)
+        return out.stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+
+
+def _git_dirty(dest: Path) -> bool:
+    """True if the checkout has uncommitted changes to *tracked* files. Untracked
+    files are ignored on purpose: configme writes generated Makefiles into each
+    checkout, and those should not block an otherwise-clean upgrade."""
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=dest, check=True, capture_output=True, text=True)
+        return bool(out.stdout.strip())
+    except (subprocess.CalledProcessError, OSError):
+        return False
+
+
 @dataclass
 class Runner:
-    download: str               # clone-ssh | clone-https | no
-    dry_run: bool
-    overwrite: bool
+    download: str = "clone-ssh"     # clone-ssh | clone-https | no
+    dry_run: bool = False
+    overwrite: bool = False
     log: List[str] = field(default_factory=list)
 
     def emit(self, line: str) -> None:
@@ -202,6 +225,33 @@ class Runner:
             return "exists"
         subprocess.run(["git", "clone", url, str(dest)], check=True)
         return "cloned"
+
+    def pull(self, node: "Node", dest: Path) -> Tuple[str, bool]:
+        """Update an existing checkout in place. Returns ``(status, updated)``
+        where status is one of: missing | dirty | dry | up-to-date | updated, and
+        ``updated`` is True only when the pull advanced HEAD (new commits).
+
+        Uses ``git pull --ff-only`` on whatever branch is checked out: a clean
+        fast-forward succeeds, anything else (diverged branch, no upstream) is
+        reported for the user to resolve by hand — never merged or clobbered.
+        A checkout with uncommitted tracked changes is skipped, not touched."""
+        if not dest.is_dir():
+            self.emit(f"# {node.name}: not present at {dest} (skipped)")
+            return "missing", False
+        if _git_dirty(dest):
+            self.emit(f"# {node.name}: uncommitted changes at {dest} (skipped)")
+            return "dirty", False
+        self.emit(f"(cd {dest} && git pull --ff-only)")
+        if self.dry_run:
+            return "dry", False
+        before = _git_head(dest)
+        try:
+            subprocess.run(["git", "pull", "--ff-only"], cwd=dest, check=True)
+        except (subprocess.CalledProcessError, OSError) as e:
+            raise InstallError(
+                f"git pull --ff-only failed in {dest} ({e}); resolve manually "
+                f"(diverged branch, missing upstream, or network).")
+        return ("updated", True) if _git_head(dest) != before else ("up-to-date", False)
 
     def link(self, link_path: Path, target: Path) -> str:
         rel = os.path.relpath(target, link_path.parent)
@@ -468,6 +518,147 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     # --- summary
     print("\nSummary:")
     for key in ("configured", "linked", "skipped", "pending", "failed"):
+        if results[key]:
+            print(f"  {key}: {', '.join(results[key])}")
+    return 1 if results["failed"] else 0
+
+
+def run_upgrade(target: str, *, install_dir: Optional[str],
+                machine: Optional[str], compiler: Optional[str],
+                build_deps: bool, dry_run: bool, only: bool = False,
+                select_fn=None, confirm_fn=None) -> int:
+    """`configme upgrade`: ``git pull`` existing checkouts in place and
+    reconfigure them with the same machine/compiler as the original install
+    (read from ``.configme/config.toml``, overridable with ``-m``/``-c``).
+
+    Mirrors ``install``'s target grammar (orchestrator + deps, a package + its
+    auto-resolved deps, a '+'-literal list, or ``--only``) but never clones: a
+    missing checkout, or one with uncommitted tracked changes, is skipped with a
+    warning (run ``configme install`` / resolve it by hand instead). Only a
+    package whose pull advanced HEAD is rebuilt, and only when it is a build.py /
+    make-built package — gated like ``install`` (``--build-deps`` forces the
+    build, otherwise an interactive prompt asks)."""
+    cwd = Path.cwd()
+    plan = build_plan(target, only=only)           # fail-fast: unknown names
+    if not plan.primary.clone:
+        parent = _parent_of(plan.primary.name)
+        hint = (f"run `configme upgrade {parent}`" if parent
+                else "upgrade its parent package")
+        raise InstallError(
+            f"{plan.primary.name} is a component of another package's checkout "
+            f"and cannot be upgraded on its own; {hint}. (To (re)generate its "
+            f"Makefile use `configme config {plan.primary.name}`.)")
+    root, _ = root_for(plan, install_dir, cwd)
+    if not root.exists():
+        raise InstallError(
+            f"{root} does not exist — nothing to upgrade. Run "
+            f"`configme install {target}` first.")
+
+    # Same selection the install used, reused from config.toml unless -m/-c
+    # override it; persisted back so a retarget sticks for later runs.
+    project = context.find_project(root)
+    machine, compiler = context.resolve_selection(machine, compiler, project, select_fn)
+    machine_path, _ = context.resolve_fragment("machine", machine, project)
+    compiler_path, _ = context.resolve_fragment("compiler", compiler, project)
+
+    runner = Runner(dry_run=dry_run)
+    runner.emit("#!/usr/bin/env bash")
+    runner.emit("# Generated by `configme upgrade` — reproduces this upgrade.")
+    runner.emit("set -euo pipefail")
+    runner.emit(f"# target={target}  machine={machine}  compiler={compiler}")
+
+    header = "DRY RUN — no changes will be made.\n" if dry_run else ""
+    print(f"{header}configme upgrade {target}")
+    print(f"  root: {root}")
+    print(f"  machine={machine}  compiler={compiler}")
+    print(f"  packages: {', '.join(n.name for n in plan.nodes)}"
+          f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
+
+    results = {"updated": [], "configured": [], "missing": [],
+               "skipped": [], "failed": []}
+
+    # --- pull phase (each checkout in place; a subpackage rides its parent's
+    # checkout, so it has no separate pull but inherits the parent's updated flag)
+    runner.emit("\n# --- pull ---")
+    updated: Dict[str, bool] = {}
+    for node in plan.nodes:
+        if not node.clone:
+            runner.emit(f"# {node.name}: component of {node.parent} (no separate pull)")
+            continue
+        dest = dest_of(node, plan, root)
+        try:
+            status, did_update = runner.pull(node, dest)
+        except InstallError as e:
+            print(f"  ! {node.name}: {e}")
+            results["failed"].append(node.name)
+            updated[node.name] = False
+            continue
+        updated[node.name] = did_update
+        print(f"  pull {node.name}: {status}")
+        if status == "missing":
+            results["missing"].append(node.name)
+        elif status == "dirty":
+            results["skipped"].append(node.name)
+        elif status == "updated":
+            results["updated"].append(node.name)
+
+    # --- reconfigure (always) + rebuild (only packages the pull advanced)
+    runner.emit("\n# --- reconfigure (per package) ---")
+    try:
+        info = netcdf.detect()
+    except netcdf.NetcdfError:
+        info = None
+    common_kw = dict(machine=machine, compiler=compiler, machine_path=machine_path,
+                     compiler_path=compiler_path, dry_run=dry_run, results=results)
+    for node in plan.nodes:
+        dest = dest_of(node, plan, root)
+        # A subpackage shares its parent's git checkout, so its "was it updated?"
+        # is the parent's pull result.
+        owner = node.name if node.clone else (node.parent or node.name)
+        was_updated = updated.get(owner, False)
+
+        if node.config_style == "build.py":
+            if node.config_subdir:
+                label = f"{node.name}/{node.config_subdir}"
+                runner.emit(f"# configure {label} Makefile (configme)")
+                configure_makefile(label=label, pkg_name=node.name, dest=dest,
+                                    config_subdir=node.config_subdir,
+                                    is_orchestrator=False, **common_kw)
+            if was_updated:
+                _emit_build_py(runner, node, dest, machine, compiler, build_deps,
+                               info, confirm_fn)
+            elif dest.is_dir():
+                print(f"  - {node.name}: unchanged; skipping rebuild")
+            continue
+
+        runner.emit(f"(cd {dest} && configme config {node.name} "
+                    f"-m {machine} -c {compiler})")
+        configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
+                            config_subdir=node.config_subdir,
+                            is_orchestrator=node.is_orchestrator, **common_kw)
+        if node.build is not None:
+            if was_updated:
+                _build_make_package(runner, node, dest, build_deps,
+                                    confirm_fn, results)
+            elif dest.is_dir():
+                print(f"  - {node.name}: unchanged; skipping rebuild")
+
+    # --- reproducibility log
+    upgrade_sh = root / ".upgrade.sh"
+    if dry_run:
+        print(f"\n--- .upgrade.sh (dry-run preview; would write {upgrade_sh}) ---")
+        print("\n".join(runner.log))
+    else:
+        upgrade_sh.write_text("\n".join(runner.log) + "\n")
+        try:
+            upgrade_sh.chmod(0o755)
+        except OSError:
+            pass
+        print(f"\n  + wrote {upgrade_sh}")
+
+    # --- summary
+    print("\nSummary:")
+    for key in ("updated", "configured", "missing", "skipped", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
     return 1 if results["failed"] else 0
