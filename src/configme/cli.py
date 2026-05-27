@@ -564,8 +564,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "target", help="orchestrator, package, or '+'-joined literal list "
         "(e.g. yelmox, yelmo, yelmox+yelmo)")
     p_install.add_argument("-d", "--download",
-                           choices=["clone-ssh", "clone-https", "no"],
-                           default="clone-ssh")
+                           choices=["ssh", "https", "no"],
+                           default="ssh",
+                           help="how to obtain repos: ssh/https clone, or "
+                           "'no' to use an existing on-disk checkout")
     p_install.add_argument("--dir", dest="install_dir", default=None)
     p_install.add_argument("-m", "--machine", default=None)
     p_install.add_argument("-c", "--compiler", default=None)

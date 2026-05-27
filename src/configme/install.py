@@ -190,7 +190,7 @@ def _git_dirty(dest: Path) -> bool:
 
 @dataclass
 class Runner:
-    download: str = "clone-ssh"     # clone-ssh | clone-https | no
+    download: str = "ssh"           # ssh | https | no
     dry_run: bool = False
     overwrite: bool = False
     log: List[str] = field(default_factory=list)
@@ -199,7 +199,7 @@ class Runner:
         self.log.append(line)
 
     def clone_url(self, node: Node) -> str:
-        if self.download == "clone-https":
+        if self.download == "https":
             return f"https://github.com/{node.org}/{node.repo}.git"
         return f"git@github.com:{node.org}/{node.repo}.git"
 
@@ -312,16 +312,40 @@ def configure_makefile(*, label, pkg_name, dest, config_subdir, is_orchestrator,
         results["failed"].append(label)
 
 
+def _primary_present(root: Path, plan: Plan) -> bool:
+    """True if ``root`` holds a real checkout of the primary, judged by the
+    presence of its Makefile template — the one file configme must get from the
+    checkout (see generate.generate_makefile / legacy_makefile).
+
+    A matching directory name or a bare ``.configme/`` dir is deliberately NOT
+    enough: configme writes ``.configme/`` itself, so a stub from an aborted run
+    — or an incomplete download with subdirs but no template — would otherwise be
+    mistaken for a finished checkout and silently skip the clone."""
+    if not root.is_dir():
+        return False
+    sub = plan.primary.config_subdir
+    cfgroot = root / sub if sub else root
+    return generate.find_repo_file(cfgroot, "Makefile") is not None
+
+
 def root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, bool]:
     """Return (root, primary_present). root holds the primary; components are
     sub-dirs of it. Default root is within the orchestrator (``yelmox/``) or the
-    named package (``yelmo/``, with its deps as ``yelmo/fesm-utils``)."""
+    named package (``yelmo/``, with its deps as ``yelmo/fesm-utils``).
+
+    ``primary_present`` reflects whether a real checkout already lives at root
+    (see _primary_present) — not merely whether the directory exists or is named
+    after the primary."""
     if install_dir:
-        return Path(install_dir).expanduser().resolve(), False
-    # Inside an existing primary checkout?
+        root = Path(install_dir).expanduser().resolve()
+        return root, _primary_present(root, plan)
+    # In or pointing at an existing primary checkout? (dir named after the
+    # primary, or one carrying configme metadata) — but only "present" if it
+    # actually holds a checkout.
     if cwd.name == plan.primary.dir or (cwd / ".configme").is_dir():
-        return cwd, True
-    return (cwd / plan.primary.dir).resolve(), False
+        return cwd, _primary_present(cwd, plan)
+    root = (cwd / plan.primary.dir).resolve()
+    return root, _primary_present(root, plan)
 
 
 def dest_of(node: Node, plan: Plan, root: Path) -> Path:
@@ -380,17 +404,27 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
 
     # --- clone phase
     runner.emit("\n# --- clone ---")
-    if not (primary_present and download != "no"):
-        if not (primary_present):
-            try:
-                st = runner.clone(plan.primary, root)
-                print(f"  clone {plan.primary.name}: {st}")
-            except (InstallError, subprocess.CalledProcessError) as e:
-                print(f"  ! {plan.primary.name}: {e}")
-                results["failed"].append(plan.primary.name)
-    else:
+    if primary_present and not overwrite:
         runner.emit(f"# {plan.primary.name}: present at {root}")
         print(f"  {plan.primary.name}: using existing {root}")
+    elif download == "no":
+        # -d no means "configure what's already on disk" — but there is no real
+        # checkout here (no Makefile template found). Fail fast rather than write
+        # a misleading .configme stub over an empty/partial directory.
+        print(f"  ! {plan.primary.name}: no checkout found at {root} "
+              f"(no Makefile template under config/ or .configme/); "
+              f"-d no cannot configure it. Clone it (drop -d no) or point "
+              f"--dir at an existing checkout.")
+        results["failed"].append(plan.primary.name)
+        print("\nSummary:\n  failed: " + plan.primary.name)
+        return 1
+    else:
+        try:
+            st = runner.clone(plan.primary, root)
+            print(f"  clone {plan.primary.name}: {st}")
+        except (InstallError, subprocess.CalledProcessError) as e:
+            print(f"  ! {plan.primary.name}: {e}")
+            results["failed"].append(plan.primary.name)
 
     for node in plan.nodes:
         if node.name == plan.primary.name:
@@ -500,7 +534,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     if plan.orchestrator is not None and plan.orchestrator.extras:
         proj = context.find_project(root) if root.exists() else None
         cfg = context.load_config(proj) if proj else {}
-        ask = ask_fn or (lambda label: None)
+        ask = ask_fn or (lambda label, default=None, *, complete_paths=False: default)
         extras_mod.run_extras(plan.orchestrator, runner, root, cfg, ask)
 
     # --- reproducibility log

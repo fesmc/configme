@@ -134,7 +134,7 @@ configme install yelmox+yelmo          # exactly those two, literal, no auto-res
 
 Options (mirroring today's `install.py`):
 
-- `-d, --download {clone-ssh|clone-https|no}` — how to obtain repos
+- `-d, --download {ssh|https|no}` — how to obtain repos
   (`no` = use existing dirs/symlinks).
 - `--dir DIR` — where to install (default `./<orchestrator>`, e.g. `./yelmox`).
 - `-m, --machine NAME`, `-c, --compiler NAME` — selection (see §6).

@@ -50,7 +50,7 @@ build what needs building — all in one command.
 ```bash
 configme install yelmox                              # clone + configure + link (+ build) the whole stack
 configme install yelmox -m dkrz_levante -c ifx       # pick the machine + compiler explicitly
-configme install yelmox -d clone-https               # clone over HTTPS (no GitHub SSH key needed)
+configme install yelmox -d https                     # clone over HTTPS (no GitHub SSH key needed)
 configme install yelmox --dir ~/models/yelmox        # put the checkout here instead of ./yelmox
 configme install yelmox --build-deps                 # rebuild dependency packages without prompting
 configme install yelmo                               # just yelmo + the sub-packages it needs
@@ -62,12 +62,12 @@ If you omit `-m`/`-c`, configme detects the machine from the hostname where it
 can and otherwise prompts you. Options combine freely, e.g.:
 
 ```bash
-configme install yelmox -m dkrz_levante -c ifx -d clone-https
+configme install yelmox -m dkrz_levante -c ifx -d https
 ```
 
 By default `configme install` clones over SSH (`git@github.com:...`), which
 needs a GitHub SSH key. On a machine where you haven't set one up (e.g. a fresh
-HPC account), `-d clone-https` clones over HTTPS instead. Use `--overwrite` to
+HPC account), `-d https` clones over HTTPS instead. Use `--overwrite` to
 re-clone over an existing checkout, or `-d no` to skip cloning entirely and
 configure whatever is already on disk.
 
