@@ -43,8 +43,45 @@ export PATH="${PATH}:${HOME}/.local/bin"
 
 ## Getting started
 
+The most common workflow is a one-shot `install`: clone a whole stack,
+configure every package for your machine/compiler, link the orchestrator, and
+build what needs building — all in one command.
+
 ```bash
-cd yelmox                          # an orchestrator checkout
+configme install yelmox                              # clone + configure + link (+ build) the whole stack
+configme install yelmox -m dkrz_levante -c ifx       # pick the machine + compiler explicitly
+configme install yelmox -d clone-https               # clone over HTTPS (no GitHub SSH key needed)
+configme install yelmox --dir ~/models               # clone into ~/models/yelmox instead of ./yelmox
+configme install yelmox --build-deps                 # rebuild dependency packages without prompting
+configme install yelmo                               # just yelmo + the sub-packages it needs
+configme install yelmo --only                        # only yelmo, nothing pulled in
+configme install yelmox --dry-run                    # preview what would be cloned/configured
+```
+
+If you omit `-m`/`-c`, configme detects the machine from the hostname where it
+can and otherwise prompts you. Options combine freely, e.g.:
+
+```bash
+configme install yelmox -m dkrz_levante -c ifx -d clone-https
+```
+
+By default `configme install` clones over SSH (`git@github.com:...`), which
+needs a GitHub SSH key. On a machine where you haven't set one up (e.g. a fresh
+HPC account), `-d clone-https` clones over HTTPS instead. Use `--overwrite` to
+re-clone over an existing checkout, or `-d no` to skip cloning entirely and
+configure whatever is already on disk.
+
+Run `configme --help` for the full command surface and `configme list` to see
+the supported orchestrators, packages, machines, and compilers.
+
+## Working in an existing directory
+
+If you already have an orchestrator checkout on disk (cloned by hand, or one you
+are developing in), run configme from inside it to configure the stack without
+cloning anything:
+
+```bash
+cd yelmox                          # an existing orchestrator checkout
 configme init                      # optional — only needed if the dir name is different than the package name
 configme -m macbook -c gfortran    # configure every package in the stack
 ```
@@ -111,19 +148,6 @@ You don't even have to run `new` first: if you pass an unknown machine to
 `config`/`install` at the interactive prompt, configme offers to create it from
 `linux` on the spot. Once your fragment works well, please consider
 contributing it back to configme so others can reuse it.
-
-### Cloning without a GitHub SSH key
-
-`configme install` clones over SSH (`git@github.com:...`) by default, which
-needs a GitHub SSH key. On a machine where you haven't set one up (e.g. a fresh
-HPC account), use `-d clone-https` to clone over HTTPS instead:
-
-```bash
-configme install yelmox -d clone-https
-```
-
-Run `configme --help` for the full command surface and `configme list` to see
-the supported orchestrators, packages, machines, and compilers.
 
 ## For configme developers
 
