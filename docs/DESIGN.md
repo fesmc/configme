@@ -348,7 +348,20 @@ concerns:
     org/repo, clone dir name, config style (`makefile-template` |
     `build.py`), inter-package link dependencies.
   - `configme/data/orchestrators/*.toml` — per orchestrator: default package
-    set + declared extras (§13). Same shape as a `.configme/manifest.toml`.
+    set + declared extras (§13). Same shape as a `.configme/manifest.toml`. A
+    `default_packages` entry may pin a git ref as `name:ref` (branch/tag/commit),
+    e.g. climber-x's `yelmo:climber-x`; the ref is checked out after cloning.
+    An optional `host` (on a package or orchestrator) selects a non-GitHub git
+    host. An `optional_packages` list names components that are *attempted* on
+    install but allowed to fail softly (private repos a given user may lack
+    access to — climber-x's `bgc`/`vilma`): a clone failure is recorded as
+    "unavailable" in the summary, not a hard failure, and subsequent steps skip
+    the absent checkout.
+  - Per-package flags of note: `optional` (soft clone failure, as above),
+    `submodules` (run `git submodule update --init --recursive` after clone,
+    e.g. bgc's M4AGO), and `config_style = "none"` for a clone-only component
+    that configme places but does not configure or build (it is compiled by the
+    orchestrator, or ships a prebuilt library — e.g. vilma).
 - Onboarding a new package or orchestrator is a **data edit** (a natural PR
   target); the CLI logic stays generic and small.
 
@@ -422,6 +435,10 @@ Initial types (those yelmox needs today):
 - `pip_package` — pip-install a command if missing (e.g. `runme`).
 - `runme_config` — create/patch `.runme_config` (hpc/account).
 - `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`).
+- `git_repo` — clone an auxiliary repo (any git host) into a named dir, e.g.
+  climber-x's `input` from GitLab. Each entry is `{dir, org, repo, host?,
+  ref?}`; `host` defaults to GitHub, `ref` is checked out after cloning, and
+  the install download mode (ssh/https/no) is honored.
 
 User/machine-specific values (data paths, hpc/account) are prompted or read
 from `.configme/config.toml` — never shipped. climber-x reuses whichever apply

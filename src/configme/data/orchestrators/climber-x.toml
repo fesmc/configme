@@ -1,19 +1,18 @@
 # climber-x orchestrator (cxesmc/climber-x).
 #
-# climber-x places its component packages at nested paths under src/ (unlike
-# yelmox, which uses the repo root), so component_paths overrides where each
-# managed component lives.
+# Layout: like every other orchestrator, configme clones climber-x's external
+# component repos directly at the climber-x root (coordinates/, fesm-utils/,
+# yelmo/). This matches the modern config/common.mk shipped on the climber-x
+# side; the legacy flat config/<machine>_<compiler> files have been updated to
+# the same root paths so `config.py` and `configme` agree.
 #
-# Two items are intentionally NOT encoded yet and need confirmation:
-#   * vilma — climber-x links a `vilma` solid-earth library (src/vilma,
-#     vega_pism.a). It has no discoverable upstream (no .gitmodules entry), so
-#     it is treated as an UNMANAGED external (like PETSc): provided by the user
-#     at src/vilma and referenced from climber-x's common.mk. Add it as a
-#     managed package here once its upstream org/repo is known.
-#   * climber-x's own config/common.mk is not yet authored (its template uses
-#     FULL/CLIM build variants with CPPFLAGS_CLIM/FULL that the current flat
-#     configs don't all define). Until then configme uses the legacy fallback
-#     (its existing flat config/<machine>_<compiler>) to configure climber-x.
+# yelmo is pinned to its `climber-x` branch via the `:climber-x` ref on the
+# component name below.
+#
+# Optional, private components (bgc, vilma) are attempted on every install but
+# skipped with a summary note for users without access (see optional_packages).
+# They live inside climber-x's own src/ tree, so component_paths overrides their
+# location (everything else clones at the root).
 
 [orchestrator]
 name = "climber-x"
@@ -22,11 +21,31 @@ repo = "climber-x"
 dir = "climber-x"
 config_style = "makefile-template"
 
-# Managed components configme can clone/configure/link.
-default_packages = ["fesm-utils", "coordinates", "yelmo"]
+# Managed components configme clones/configures/links, in build order. Each is
+# cloned at the climber-x root (its default package dir); `yelmo:climber-x`
+# pins the yelmo `climber-x` branch.
+default_packages = ["fesm-utils", "coordinates", "yelmo:climber-x"]
 
-# Where each managed component lives, relative to the climber-x root.
+# Optional components (private repos): attempted on install, but a clone failure
+# (no access) is a soft skip recorded as "unavailable" — never a hard failure.
+#   * bgc   — HAMOCC ocean biogeochemistry (carries the M4AGO submodule).
+#   * vilma — VILMA solid-earth model (prebuilt lib for the FULL build variant).
+optional_packages = ["bgc", "vilma"]
+
+# bgc and vilma live inside climber-x's src/ tree (not at the root).
 [orchestrator.component_paths]
-fesm-utils = "src/utils/fesm-utils"
-coordinates = "src/utils/coordinates"
-yelmo = "src/yelmo"
+bgc = "src/bgc"
+vilma = "src/vilma"
+
+# Typed post-config extras (see docs/DESIGN.md sec. 12).
+[orchestrator.extras]
+pip_package = ["runme"]       # install the `runme` command if missing
+runme_config = true           # create/patch .runme_config (hpc/account)
+
+# CLIMBER-X input data lives in a separate GitLab repo (large files), cloned
+# into ./input. Honors the install download mode (ssh/https/no).
+[[orchestrator.extras.git_repo]]
+dir = "input"
+host = "gitlab.pik-potsdam.de"
+org = "cxesmc"
+repo = "climber-x-input"
