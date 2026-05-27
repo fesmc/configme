@@ -1,3 +1,4 @@
 - Repository to support compilation of yelmox related libraries.
 - API need to be robust and failsafe, with clear and extensible methods.
 - Include good comments and readme notes.
+- Every change to functionality (anything other than README/docs-only edits) requires a version bump in `src/configme/__init__.py` — patch by default (bump minor/major only when explicitly warranted).
