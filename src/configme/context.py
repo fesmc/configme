@@ -7,7 +7,7 @@ that lets one machine/compiler choice drive every component of an orchestrator:
 - reading / writing its ``.configme/{manifest,config}.toml``;
 - the user-level ``~/.configme/`` (override ``CONFIGME_HOME`` for testing);
 - the three-tier fragment lookup  orchestrator > user > shipped;
-- hostname-based machine auto-detection;
+- hostname-based machine auto-detection, with an OS-platform fallback;
 - resolving the machine + compiler selection with full precedence.
 """
 
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import platform
 import socket
 from dataclasses import dataclass
 from pathlib import Path
@@ -367,6 +368,21 @@ def hostname_machine() -> Optional[str]:
     return None
 
 
+def platform_machine() -> Optional[str]:
+    """Best-effort generic machine from the host OS, used only when no hostname
+    pattern matched. macOS maps to ``macbook`` and Linux to the generic
+    ``linux`` base; everything else stays unresolved so configme prompts.
+
+    This sits below ``hostname_machine`` in precedence: a recognised cluster
+    login node always wins over the OS fallback."""
+    system = platform.system()
+    if system == "Darwin":
+        return "macbook"
+    if system == "Linux":
+        return "linux"
+    return None
+
+
 def _compiler_defaults() -> Dict[str, str]:
     path = data.DATA_DIR / "compiler_defaults.toml"
     if not path.is_file():
@@ -391,7 +407,8 @@ def resolve_selection(machine: Optional[str], compiler: Optional[str],
     """Resolve machine + compiler with precedence:
 
         explicit flag > orchestrator config.toml > user config.toml
-                      > hostname auto-detect (machine only) > prompt
+                      > hostname auto-detect > OS-platform fallback
+                      (machine only) > prompt
 
     When anything is still unresolved, ``select_fn(project, machine, compiler,
     default_compiler)`` (see cli._select) returns the final, complete pair: it
@@ -404,7 +421,7 @@ def resolve_selection(machine: Optional[str], compiler: Optional[str],
     user_cfg = load_user_config()
 
     machine = (machine or proj_cfg.get("machine") or user_cfg.get("machine")
-               or hostname_machine())
+               or hostname_machine() or platform_machine())
     compiler = (compiler or proj_cfg.get("compiler") or user_cfg.get("compiler"))
 
     if not machine or not compiler:
