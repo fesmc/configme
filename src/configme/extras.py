@@ -17,10 +17,33 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import List, Optional, Protocol
+
+
+def _slurm_accounts() -> List[str]:
+    """Best-effort list of Slurm accounts the current user may submit under, for
+    use as a prompt hint only. Queries the association table via ``sacctmgr``
+    (``sacct`` reports past jobs, not entitlements). Returns ``[]`` whenever
+    ``sacctmgr`` is absent or the query fails/times out — e.g. on a non-Slurm
+    machine — so this never blocks or breaks the prompt."""
+    if shutil.which("sacctmgr") is None:
+        return []
+    cmd = ["sacctmgr", "-nP", "show", "associations"]
+    user = os.environ.get("USER")
+    if user:
+        cmd.append(f"user={user}")
+    cmd.append("format=account")
+    try:
+        out = subprocess.run(cmd, check=True, capture_output=True, text=True,
+                             timeout=10)
+    except (subprocess.SubprocessError, OSError):
+        return []
+    accounts = {line.strip() for line in out.stdout.splitlines() if line.strip()}
+    return sorted(accounts)
 
 
 class _Ask(Protocol):
@@ -62,7 +85,14 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
     # The runme ``hpc`` is the machine name; default it to the machine this
     # install/config already resolved, so it need not be retyped when correct.
     hpc = cfg.get("hpc") or ask("hpc name for .runme_config", default=machine)
-    account = cfg.get("account") or ask("hpc account for .runme_config")
+    # The account is too case-specific to default, but list the accounts the
+    # user may submit under (best-effort, Slurm-only) as a hint before asking.
+    account = cfg.get("account")
+    if not account:
+        accounts = _slurm_accounts()
+        if accounts:
+            print(f"  available accounts: {', '.join(accounts)}")
+        account = ask("hpc account for .runme_config")
     runner.emit("# runme_config: create .runme_config and set hpc/account")
     runner.emit("runme --config  # or: cp .runme/runme_config .runme_config")
     if runner.dry_run:

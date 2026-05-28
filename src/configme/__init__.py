@@ -3,4 +3,4 @@
 See docs/DESIGN.md for the full design specification.
 """
 
-__version__ = "0.4.6"
+__version__ = "0.4.7"
