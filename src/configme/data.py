@@ -108,6 +108,24 @@ class BuildSpec:
         return self._VARIANT_FLAG[variant]
 
 
+def _parse_artifacts(raw: dict, source: Path) -> Dict[str, List[str]]:
+    """Validate and normalise a ``[package.artifacts]`` table: a mapping of
+    variant name -> list of artifact paths (strings). Anything else is a data
+    error rather than a silent skip, since a malformed table would make
+    ``configme status`` under-report build completeness."""
+    if not isinstance(raw, dict):
+        raise DataError(f"{source}: [package.artifacts] must be a table "
+                        f"(variant -> list of paths)")
+    out: Dict[str, List[str]] = {}
+    for variant, paths in raw.items():
+        if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+            raise DataError(
+                f"{source}: [package.artifacts] '{variant}' must be a list of "
+                f"path strings")
+        out[variant] = list(paths)
+    return out
+
+
 @dataclass
 class Package:
     name: str
@@ -133,6 +151,13 @@ class Package:
     subpackages: List[str] = field(default_factory=list)
     # If set, configme builds this package via `make` after configuring it.
     build: "Optional[BuildSpec]" = None
+    # Build artifacts (library files) that prove a build completed, keyed by
+    # variant name (serial/omp) -> paths relative to the package's checkout dir.
+    # Lets `configme status` report build completeness by probing the disk,
+    # without re-running make. Build-style-agnostic: it works the same for a
+    # build.py package (fesm-utils' LIS+FFTW) and a `make` package
+    # (fesm-utils/utils' libfesmutils). Empty when a package declares none.
+    artifacts: Dict[str, List[str]] = field(default_factory=dict)
     # True for an optional component (often private): a clone failure — e.g. no
     # access to a private repo — is a soft skip recorded in the summary, never a
     # hard install failure. (See climber-x's bgc/vilma.)
@@ -149,6 +174,7 @@ class Package:
             raise DataError(f"{path}: missing [package] table")
         links = [Link.from_dict(d, path) for d in pkg.get("links", [])]
         build = pkg.get("build")
+        artifacts = _parse_artifacts(pkg.get("artifacts", {}), path)
         try:
             style = pkg.get("config_style", "makefile-template")
             return cls(
@@ -164,6 +190,7 @@ class Package:
                 clone=bool(pkg.get("clone", True)),
                 subpackages=list(pkg.get("subpackages", [])),
                 build=BuildSpec.from_dict(build, path) if build else None,
+                artifacts=artifacts,
                 optional=bool(pkg.get("optional", False)),
                 submodules=bool(pkg.get("submodules", False)),
             )

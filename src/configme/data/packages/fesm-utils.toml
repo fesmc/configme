@@ -19,3 +19,10 @@ config_styles = ["build.py", "makefile-template"]
 # utils lives inside this checkout; configme configures and builds it as a
 # separate node that rides along wherever fesm-utils goes.
 subpackages = ["fesm-utils/utils"]
+
+# Library files build.py produces, per variant (paths relative to the fesm-utils
+# checkout). `configme status` probes these to report whether the autotools
+# build of LIS + FFTW is complete for each variant.
+[package.artifacts]
+serial = ["lis-serial/lib/liblis.a", "fftw-serial/lib/libfftw3.a"]
+omp = ["lis-omp/lib/liblis.a", "fftw-omp/lib/libfftw3.a"]

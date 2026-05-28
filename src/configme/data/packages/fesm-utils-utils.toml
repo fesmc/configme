@@ -20,3 +20,10 @@ clone = false
 [package.build]
 make_target = "fesmutils-static"
 variants = ["serial", "omp"]
+
+# The static library `make fesmutils-static` produces, per variant (paths
+# relative to the utils checkout). `configme status` probes these to report
+# whether the build is complete.
+[package.artifacts]
+serial = ["include-serial/libfesmutils.a"]
+omp = ["include-omp/libfesmutils.a"]
