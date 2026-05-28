@@ -19,11 +19,20 @@ dependencies = [
     "tomli; python_version < '3.11'",
 ]
 
+# Test-only extras: `pip install -e .[test]` then `pytest`.
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
 [project.scripts]
 configme = "configme.cli:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "configme.__version__" }
+
+[tool.pytest.ini_options]
+# Tests import the package from src/ without requiring an install.
+pythonpath = ["src"]
+testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
