@@ -226,6 +226,18 @@ def _git_head(dest: Path) -> Optional[str]:
         return None
 
 
+def _git_branch(dest: Path) -> Optional[str]:
+    """Current branch name of the checkout (None if not a git repo or if HEAD is
+    detached). Used to tell whether a checkout already sits on a pinned ref."""
+    try:
+        out = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                             cwd=dest, check=True, capture_output=True, text=True)
+        name = out.stdout.strip()
+        return name if name and name != "HEAD" else None
+    except (subprocess.CalledProcessError, OSError):
+        return None
+
+
 def _git_dirty(dest: Path) -> bool:
     """True if the checkout has uncommitted changes to *tracked* files. Untracked
     files are ignored on purpose: configme writes generated Makefiles into each
@@ -254,7 +266,13 @@ class Runner:
 
     def clone(self, node: Node, dest: Path) -> str:
         """Clone ``node`` to ``dest`` and, if it pins a ref, check it out.
-        Returns a status string: cloned | exists | present(no) | dry."""
+
+        When ``dest`` already exists and the node pins a ref, the ref is still
+        enforced (see ``_ensure_ref``) so the pin is authoritative on every
+        install, not just the first clone.
+
+        Returns a status string:
+        cloned | exists | switched | dirty | present(no) | dry."""
         if self.download == "no":
             if not (dest.exists() or dest.is_symlink()):
                 raise InstallError(
@@ -273,10 +291,12 @@ class Runner:
             self.emit(f"(cd {dest} && git checkout {node.ref})")
         if node.submodules:
             self.emit(f"(cd {dest} && git submodule update --init --recursive)")
+        if dest.exists() and not self.overwrite:
+            # Existing checkout: enforce a pinned ref (read-only probing in
+            # dry-run; _ensure_ref skips the actual checkout when dry_run).
+            return self._ensure_ref(node, dest) if node.ref else "exists"
         if self.dry_run:
             return "dry"
-        if dest.exists() and not self.overwrite:
-            return "exists"
         subprocess.run(["git", "clone", url, str(dest)], check=True)
         if node.ref:
             subprocess.run(["git", "checkout", node.ref], cwd=dest, check=True)
@@ -284,6 +304,39 @@ class Runner:
             subprocess.run(["git", "submodule", "update", "--init", "--recursive"],
                            cwd=dest, check=True)
         return "cloned"
+
+    def _ensure_ref(self, node: "Node", dest: Path) -> str:
+        """Bring an existing checkout onto the ref its orchestrator pins (e.g.
+        yelmo's ``climber-x`` branch). Returns: exists | switched | dirty.
+
+        Already on the ref -> ``exists``. Uncommitted tracked changes -> the
+        switch is skipped and reported (never clobbered), returning ``dirty``.
+        Otherwise the checkout is switched to the ref; a plain ``git checkout``
+        is tried first (offline-friendly when the ref is already fetched) and,
+        only if that fails, a ``git fetch`` + retry covers a ref created after
+        the original clone."""
+        if _git_branch(dest) == node.ref:
+            return "exists"
+        if _git_dirty(dest):
+            self.emit(f"# {node.name}: uncommitted changes at {dest}; "
+                      f"cannot switch to {node.ref} (skipped)")
+            return "dirty"
+        self.emit(f"(cd {dest} && git checkout {node.ref})")
+        if self.dry_run:
+            return "switched"
+        try:
+            subprocess.run(["git", "checkout", node.ref], cwd=dest, check=True,
+                           capture_output=True, text=True)
+        except (subprocess.CalledProcessError, OSError):
+            self.emit(f"(cd {dest} && git fetch && git checkout {node.ref})")
+            try:
+                subprocess.run(["git", "fetch"], cwd=dest, check=True)
+                subprocess.run(["git", "checkout", node.ref], cwd=dest, check=True)
+            except (subprocess.CalledProcessError, OSError) as e:
+                raise InstallError(
+                    f"{node.name}: could not switch {dest} to ref {node.ref} "
+                    f"({e}); switch it by hand or re-clone with --overwrite.")
+        return "switched"
 
     def pull(self, node: "Node", dest: Path) -> Tuple[str, bool]:
         """Update an existing checkout in place. Returns ``(status, updated)``
