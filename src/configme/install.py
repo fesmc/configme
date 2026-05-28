@@ -615,6 +615,11 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         mf, created = context.write_manifest(root, plan.primary.name, deps)
         print(f"  + wrote {mf}" if created else f"  manifest: using existing {mf}")
 
+    # Commands the user must run later (a pending link's missing dependency, a
+    # deferred build, then any deferred extras) are collected here and echoed
+    # together in the summary's "Deferred" section.
+    followups: List[str] = []
+
     # --- link phase (non-primary packages only)
     runner.emit("\n# --- links ---")
     plan_names = {n.name for n in plan.nodes}
@@ -647,6 +652,13 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 print(f"  ! {node.name}: dependency '{link.dep}' not in this "
                       f"install; link {link.path} created but pending")
                 results["pending"].append(f"{node.name}->{link.dep}")
+                # Surface the fix in the summary's deferred list: installing the
+                # missing dependency resolves every pending link onto it, so
+                # dedupe the hint per dependency. Skipped on a dry run, matching
+                # the deferred-build/extras hints (dry run only previews).
+                hint = f"configme install {link.dep}"
+                if not dry_run and hint not in followups:
+                    followups.append(hint)
                 continue
             st = runner.link(link_path, dep_dest)
             print(f"  link {node.name}/{link.path} -> {link.dep}: {st}")
@@ -654,9 +666,6 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 results["linked"].append(f"{node.name}/{link.path}")
 
     # --- configure phase
-    # Commands the user must run later (deferred builds below, then any deferred
-    # extras) are collected here and echoed together in the summary.
-    followups: List[str] = []
     runner.emit("\n# --- configure (per package) ---")
     info = None
     try:
