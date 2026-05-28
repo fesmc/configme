@@ -74,6 +74,15 @@ def _dedupe(tokens: List[str]) -> List[str]:
     return out
 
 
+def _add_rpath(tokens: List[str]) -> List[str]:
+    """Append a runtime search path (-Wl,-rpath,<dir>) for every -L<dir> link
+    directory, so the resulting binary finds the shared netCDF libraries at
+    runtime without relying on LD_LIBRARY_PATH. Directories are deduped and the
+    rpath flags are placed after the existing link tokens."""
+    libdirs = _dedupe([t[2:] for t in tokens if t.startswith("-L") and len(t) > 2])
+    return tokens + [f"-Wl,-rpath,{d}" for d in libdirs]
+
+
 def _include_flags(*flag_strings: Optional[str]) -> List[str]:
     """Extract only the -I include tokens from one or more compiler-flag strings
     (so optimisation/warning flags like -O2/-g do not leak into INC_NC)."""
@@ -125,6 +134,7 @@ def _detect_from_config_tools() -> Optional[NetcdfInfo]:
         libs = _dedupe(libs)
     if not libs:
         return None
+    libs = _add_rpath(libs)
 
     return NetcdfInfo(
         nc_froot=nf_prefix,
@@ -145,7 +155,9 @@ def _info_from_roots(froot: Optional[str], croot: Optional[str],
     froot = froot or croot
     croot = croot or froot
     inc = _dedupe([f"-I{froot}/include", f"-I{croot}/include"])
-    lib = _dedupe([f"-L{froot}/lib", "-lnetcdff", f"-L{croot}/lib", "-lnetcdf"])
+    lib = _add_rpath(
+        _dedupe([f"-L{froot}/lib", "-lnetcdff", f"-L{croot}/lib", "-lnetcdf"])
+    )
     return NetcdfInfo(
         nc_froot=froot,
         nc_croot=croot,
