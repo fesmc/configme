@@ -654,6 +654,9 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 results["linked"].append(f"{node.name}/{link.path}")
 
     # --- configure phase
+    # Commands the user must run later (deferred builds below, then any deferred
+    # extras) are collected here and echoed together in the summary.
+    followups: List[str] = []
     runner.emit("\n# --- configure (per package) ---")
     info = None
     try:
@@ -677,7 +680,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             # in results, so the parent node's status reflects what actually
             # happened rather than the --build-deps flag.
             _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                           info, results, confirm_fn)
+                           info, results, confirm_fn, followups)
             # A build.py package may also expose a makefile-template config
             # subdir that configme generates directly. (fesm-utils instead now
             # carries its utils component as a separate subpackage.)
@@ -697,16 +700,15 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         # compiled here, after its Makefile exists. Gated like the build.py step.
         if node.build is not None:
             _build_make_package(runner, node, dest, build_deps,
-                                confirm_fn, results)
+                                confirm_fn, results, followups)
 
     # --- extras (orchestrator post-config steps)
-    followups: List[str] = []
     if plan.orchestrator is not None and plan.orchestrator.extras:
         proj = context.find_project(root) if root.exists() else None
         cfg = context.load_config(proj) if proj else {}
         ask = ask_fn or (lambda label, default=None, *, complete_paths=False: default)
-        followups = extras_mod.run_extras(plan.orchestrator, runner, root, cfg,
-                                          ask, confirm_fn, machine=machine)
+        followups.extend(extras_mod.run_extras(plan.orchestrator, runner, root, cfg,
+                                               ask, confirm_fn, machine=machine))
 
     # --- reproducibility log
     install_sh = root / ".install.sh"
@@ -917,7 +919,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
 
 
 def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
-                   results, confirm_fn=None):
+                   results, confirm_fn=None, followups=None):
     """fesm-utils-style package: print/run its build.py (see issue #7).
 
     The build runs autotools and is slow (~10-30 min), so it is not run
@@ -936,10 +938,17 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
     runner.emit(f"# {node.name}: build with autotools (slow, ~10-30 min):")
     runner.emit(f"(cd {dest} && {cmd})")
 
-    if runner.dry_run or not dest.is_dir():
+    def _defer() -> None:
         print(f"  - {node.name}: build.py-style; run when ready:")
         print(f"      (cd {dest} && {cmd})")
         results["deferred"].append(node.name)
+        # Surface the command in the summary's consolidated deferred list — but
+        # not on a dry run, where the whole .install.sh is already previewed.
+        if followups is not None and not runner.dry_run:
+            followups.append(f"(cd {dest} && {cmd})")
+
+    if runner.dry_run or not dest.is_dir():
+        _defer()
         return
 
     do_build = build_deps
@@ -949,9 +958,7 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
         do_build = confirm_fn(f"Build {node.name} now?", True)
 
     if not do_build:
-        print(f"  - {node.name}: build.py-style; run when ready:")
-        print(f"      (cd {dest} && {cmd})")
-        results["deferred"].append(node.name)
+        _defer()
         return
 
     print(f"  building {node.name}: {cmd}")
@@ -969,7 +976,8 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
         results["failed"].append(node.name)
 
 
-def _build_make_package(runner, node, dest, build_deps, confirm_fn, results):
+def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
+                        followups=None):
     """Compile a package whose build configme owns (`[package.build]`), once per
     variant: ``make openmp=<0|1> <make_target>``. Runs in the inherited shell
     environment (the Makefile already carries the configme-resolved compiler /
@@ -988,6 +996,11 @@ def _build_make_package(runner, node, dest, build_deps, confirm_fn, results):
         for _, cmd in cmds:
             print(f"      (cd {dest} && {cmd})")
         results["deferred"].append(node.name)
+        # Echo in the summary's consolidated deferred list (skip on a dry run,
+        # where the whole .install.sh is already previewed).
+        if followups is not None and not runner.dry_run:
+            for _, cmd in cmds:
+                followups.append(f"(cd {dest} && {cmd})")
 
     if runner.dry_run or not dest.is_dir():
         _defer("configured")
