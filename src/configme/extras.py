@@ -6,7 +6,7 @@ specific values (hpc/account, data paths) come from ``.configme/config.toml`` or
 an interactive prompt; nothing site-specific is shipped.
 
 Handlers:
-    pip_package = ["runme", ...]   install a command via pip if missing
+    pip_package = ["runme", ...]   pip install -U (install or update via pip)
     runme_config = true            create/patch .runme_config (hpc/account)
     data_link = ["ice_data", ...]  symlink runtime data dirs
     git_repo = [{dir, org, repo, host?, ref?}, ...]
@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,20 +34,21 @@ def _pip_package(value, runner, root: Path, cfg: dict, ask,
     status = []
     for name in names:
         url = f"git+https://github.com/fesmc/{name}"
-        runner.emit(f"command -v {name} >/dev/null 2>&1 || pip install {url}")
+        # Always `pip install -U`: pip decides whether the package is missing or
+        # out of date and installs/upgrades as needed. We don't pre-check with
+        # `command -v`/`shutil.which` — that only tells us a command exists, not
+        # whether it's current, and would skip available updates.
+        runner.emit(f"pip install -U {url}")
         if runner.dry_run:
-            print(f"  pip_package {name}: (dry) install if missing ({url})")
+            print(f"  pip_package {name}: (dry) pip install -U ({url})")
             continue
-        if shutil.which(name):
-            print(f"  pip_package {name}: already on PATH; skipping")
-            status.append(f"{name}=present")
-            continue
-        print(f"  pip_package {name}: installing ({url})")
+        print(f"  pip_package {name}: installing/updating ({url})")
         try:
-            subprocess.run([sys.executable, "-m", "pip", "install", url], check=True)
-            status.append(f"{name}=installed")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-U", url], check=True)
+            status.append(f"{name}=ok")
         except (subprocess.CalledProcessError, OSError) as e:
-            print(f"  ! pip install {name} failed: {e}")
+            print(f"  ! pip install -U {name} failed: {e}")
             status.append(f"{name}=failed")
     return ", ".join(status)
 

@@ -3,6 +3,7 @@
 Command surface (see docs/DESIGN.md sec. 4)::
 
     configme install <target> [options]   clone/use-existing + configure + link + build
+    configme update [options]              self-update: pip install -U configme
     configme upgrade [<target>] [options] git pull + reconfigure (+ rebuild if changed)
     configme config [<target>] [options]  config-only: (re)generate Makefile(s)
     configme [-m M] [-c C]                alias for `configme config` on the current dir
@@ -23,6 +24,7 @@ import argparse
 import contextlib
 import glob
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,7 +32,8 @@ from configme import __version__, context, data, generate, install, netcdf
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
 # configures the current orchestrator; name packages with `configme config`.
-VERBS = {"install", "upgrade", "config", "show", "new", "netcdf", "init", "list"}
+VERBS = {"install", "update", "upgrade", "config", "show", "new", "netcdf",
+         "init", "list"}
 
 
 # ----------------------------------------------------------------- not-yet-impl
@@ -481,6 +484,26 @@ def cmd_install(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_update(args: argparse.Namespace) -> int:
+    """`configme update` — self-update configme by reinstalling the latest from
+    its git repo with ``pip install -U``. Lets pip decide whether anything needs
+    to change; we don't pre-check the installed version."""
+    url = "git+https://github.com/fesmc/configme"
+    cmd = [sys.executable, "-m", "pip", "install", "-U", url]
+    if args.dry_run:
+        print("DRY RUN — no changes will be made.")
+        print(f"  would run: {' '.join(cmd)}")
+        return 0
+    print(f"configme update (currently {__version__})")
+    print(f"  running: {' '.join(cmd)}")
+    try:
+        subprocess.run(cmd, check=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"configme: self-update failed: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_upgrade(args: argparse.Namespace) -> int:
     """`configme upgrade [target]` — git pull existing checkouts + reconfigure
     with the same machine/compiler as before. With no target, upgrades the
@@ -581,6 +604,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_install.add_argument("--build-deps", action="store_true")
     p_install.add_argument("--dry-run", action="store_true")
     p_install.set_defaults(func=cmd_install)
+
+    p_update = sub.add_parser(
+        "update", help="self-update configme (pip install -U from its git repo)")
+    p_update.add_argument("--dry-run", action="store_true",
+                          help="print the pip command without running it")
+    p_update.set_defaults(func=cmd_update)
 
     p_upgrade = sub.add_parser(
         "upgrade", help="git pull existing checkouts + reconfigure "

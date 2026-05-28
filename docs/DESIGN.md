@@ -109,6 +109,8 @@ seed manifest for that orchestrator.
 
 ```
 configme install <target> [options]   # clone/use-existing + configure + link + build
+configme update [options]              # self-update: pip install -U configme
+configme upgrade [<target>] [options] # git pull existing checkouts + reconfigure
 configme config [<target>] [options]  # config-only: (re)generate Makefile(s)
 configme [-m M] [-c C]                # alias for `configme config` on the current dir
 configme show <name>                   # print a machine/compiler fragment to stdout
@@ -432,7 +434,8 @@ in its TOML — **not** as arbitrary shell hooks.
 
 Initial types (those yelmox needs today):
 
-- `pip_package` — pip-install a command if missing (e.g. `runme`).
+- `pip_package` — `pip install -U` a command (e.g. `runme`); pip installs it if
+  missing or upgrades it if out of date.
 - `runme_config` — create/patch `.runme_config` (hpc/account).
 - `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`).
 - `git_repo` — clone an auxiliary repo (any git host) into a named dir, e.g.
