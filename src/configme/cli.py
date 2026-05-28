@@ -6,6 +6,7 @@ Command surface (see docs/DESIGN.md sec. 4)::
     configme update [options]              self-update: pip install -U configme
     configme upgrade [<target>] [options] git pull + reconfigure (+ rebuild if changed)
     configme config [<target>] [options]  config-only: (re)generate Makefile(s)
+    configme status [<target>] [options]  read-only: what is present / still pending
     configme [-m M] [-c C]                alias for `configme config` on the current dir
     configme show <name>                   print a machine/compiler fragment to stdout
     configme new machine|compiler <name>   scaffold a fragment from an existing one
@@ -28,12 +29,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from configme import __version__, context, data, generate, install, netcdf
+from configme import __version__, context, data, generate, install, netcdf, status
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
 # configures the current orchestrator; name packages with `configme config`.
 VERBS = {"install", "update", "upgrade", "config", "show", "new", "netcdf",
-         "init", "list"}
+         "init", "list", "status"}
 
 
 # ----------------------------------------------------------------- not-yet-impl
@@ -409,6 +410,13 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
     for key in ("configured", "skipped", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
+    # Read-only "still pending" picture of the whole checkout — config only
+    # (re)generates Makefiles, so this surfaces repos/links/builds/extras the
+    # user still needs to address (see `configme status`). Skipped on a dry run.
+    if not dry_run:
+        block = status.pending_block(status.inspect(plan, root))
+        if block:
+            print(block)
     return 1 if results["failed"] else 0
 
 
@@ -418,6 +426,22 @@ def cmd_config_verb(args: argparse.Namespace) -> int:
     for that)."""
     return cmd_config(args.target, args.machine, args.compiler,
                       only=args.only, dry_run=args.dry_run)
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """`configme status [target]` — read-only report of what is present on disk
+    and what is still pending: every repository (including optional and data
+    ones), every build symlink, each declared build artifact, and each
+    orchestrator extra. Reconstructs the same plan as `install`/`config` but
+    makes no changes. Exit 1 if anything is a hard problem (missing/broken/
+    half-built), else 0; purely-pending (deferred) items do not fail."""
+    cwd = Path.cwd()
+    target = args.target or _bare_target(cwd)
+    plan = install.build_plan(target)
+    root, _ = install.root_for(plan, args.install_dir, cwd)
+    checks = status.inspect(plan, root)
+    print(status.render(checks, root, plan.primary.name, verbose=args.verbose))
+    return 1 if status.has_problems(checks) else 0
 
 
 def cmd_netcdf(args: argparse.Namespace) -> int:
@@ -612,6 +636,18 @@ def _build_parser() -> argparse.ArgumentParser:
                           "an orchestrator to its subpackages")
     p_config.add_argument("--dry-run", action="store_true")
     p_config.set_defaults(func=cmd_config_verb)
+
+    p_status = sub.add_parser(
+        "status", help="read-only: report what is present and what is still "
+        "pending (repos, links, builds, extras)")
+    p_status.add_argument(
+        "target", nargs="?", default=None,
+        help="orchestrator, package, or '+'-joined literal list "
+        "(e.g. yelmox, yelmo, yelmox+yelmo). Default: the current directory.")
+    p_status.add_argument("--dir", dest="install_dir", default=None)
+    p_status.add_argument("-v", "--verbose", action="store_true",
+                          help="show every check, including ones already ok")
+    p_status.set_defaults(func=cmd_status)
 
     p_install = sub.add_parser(
         "install", help="clone/use-existing + configure + link a stack")

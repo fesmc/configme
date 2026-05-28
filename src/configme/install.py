@@ -748,6 +748,16 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         print("\nDeferred — run these when ready:")
         for cmd in followups:
             print(f"  {cmd}")
+    # Read-only "still pending" picture of the whole checkout — covers
+    # pre-existing state (e.g. an optional repo or data clone skipped on an
+    # earlier run, a deferred build), not just what this run deferred. Imported
+    # lazily to avoid a status <-> install import cycle. Skipped on a dry run
+    # (the previewed .install.sh already shows what would change).
+    if not dry_run:
+        from configme import status
+        block = status.pending_block(status.inspect(plan, root))
+        if block:
+            print(block)
     return 1 if results["failed"] else 0
 
 
