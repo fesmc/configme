@@ -29,7 +29,7 @@ class _Ask(Protocol):
 
 
 def _pip_package(value, runner, root: Path, cfg: dict, ask,
-                 confirm=None, followups=None) -> str:
+                 confirm=None, followups=None, machine: Optional[str] = None) -> str:
     names = value if isinstance(value, list) else [value]
     status = []
     for name in names:
@@ -54,12 +54,14 @@ def _pip_package(value, runner, root: Path, cfg: dict, ask,
 
 
 def _runme_config(value, runner, root: Path, cfg: dict, ask,
-                  confirm=None, followups=None) -> str:
+                  confirm=None, followups=None, machine: Optional[str] = None) -> str:
     if not value:
         return ""
     src = root / ".runme" / "runme_config"
     dst = root / ".runme_config"
-    hpc = cfg.get("hpc") or ask("hpc name for .runme_config")
+    # The runme ``hpc`` is the machine name; default it to the machine this
+    # install/config already resolved, so it need not be retyped when correct.
+    hpc = cfg.get("hpc") or ask("hpc name for .runme_config", default=machine)
     account = cfg.get("account") or ask("hpc account for .runme_config")
     runner.emit("# runme_config: create .runme_config and set hpc/account")
     runner.emit("runme --config  # or: cp .runme/runme_config .runme_config")
@@ -88,7 +90,7 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
 
 
 def _data_link(value, runner, root: Path, cfg: dict, ask,
-               confirm=None, followups=None) -> str:
+               confirm=None, followups=None, machine: Optional[str] = None) -> str:
     labels = value if isinstance(value, list) else [value]
     done = []
     for label in labels:
@@ -119,7 +121,7 @@ def _data_link(value, runner, root: Path, cfg: dict, ask,
 
 
 def _git_repo(value, runner, root: Path, cfg: dict, ask,
-              confirm=None, followups=None) -> str:
+              confirm=None, followups=None, machine: Optional[str] = None) -> str:
     """Clone one or more auxiliary git repos into named dirs under the
     orchestrator root — e.g. climber-x's ``input`` from GitLab. Each entry is a
     table ``{dir, org, repo, host?, ref?, protocol?}``; ``host`` defaults to
@@ -218,10 +220,13 @@ _HANDLERS: dict = {
 
 
 def run_extras(orchestrator, runner, root: Path, cfg: dict,
-               ask: _Ask, confirm=None) -> list:
+               ask: _Ask, confirm=None, machine: Optional[str] = None) -> list:
     """Run the orchestrator's typed extras. Returns a list of follow-up shell
     commands for steps the user deferred (e.g. a declined ``git_repo`` clone),
-    so the caller can echo them in the install summary."""
+    so the caller can echo them in the install summary.
+
+    ``machine`` is the machine name already resolved for this install/config;
+    handlers may use it as a default (e.g. ``runme_config``'s ``hpc``)."""
     followups: list = []
     extras = orchestrator.extras or {}
     if not extras:
@@ -233,5 +238,5 @@ def run_extras(orchestrator, runner, root: Path, cfg: dict,
         if handler is None:
             print(f"  ! unknown extra '{name}' (skipping)")
             continue
-        handler(value, runner, root, cfg, ask, confirm, followups)
+        handler(value, runner, root, cfg, ask, confirm, followups, machine=machine)
     return followups

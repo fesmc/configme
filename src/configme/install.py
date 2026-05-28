@@ -706,7 +706,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         cfg = context.load_config(proj) if proj else {}
         ask = ask_fn or (lambda label, default=None, *, complete_paths=False: default)
         followups = extras_mod.run_extras(plan.orchestrator, runner, root, cfg,
-                                          ask, confirm_fn)
+                                          ask, confirm_fn, machine=machine)
 
     # --- reproducibility log
     install_sh = root / ".install.sh"
