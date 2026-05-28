@@ -351,6 +351,35 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
           f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
 
     results = {"configured": [], "skipped": [], "failed": []}
+
+    # --- ref reconcile: resolve each component's ref (manifest pin wins over the
+    # orchestrator default) and switch its checkout *before* regenerating any
+    # Makefile — the template lives inside the checkout and can differ between
+    # refs. A clean branch mismatch is confirmed (default yes); a dirty or
+    # declined checkout is left untouched and reported.
+    install._apply_manifest_refs(plan.nodes, project)
+    reconciler = install.Runner(dry_run=dry_run)
+    for node in plan.nodes:
+        if not node.ref or not node.clone:
+            continue
+        dest = install.dest_of(node, plan, root)
+        if not dest.is_dir():
+            continue
+        try:
+            st = reconciler.ensure_ref(node, dest, confirm_fn=_confirm)
+        except install.InstallError as e:
+            print(f"  ! {node.name}: {e}")
+            results["failed"].append(node.name)
+            continue
+        if st == "switched":
+            print(f"  ref {node.name}: switched to {node.ref}")
+        elif st == "dirty":
+            print(f"  ref {node.name}: dirty; not switched to {node.ref} (skipped)")
+            results["skipped"].append(node.name)
+        elif st == "declined":
+            print(f"  ref {node.name}: kept current branch "
+                  f"(declined switch to {node.ref})")
+
     common_kw = dict(machine=machine, compiler=compiler, machine_path=machine_path,
                      compiler_path=compiler_path, dry_run=dry_run, results=results)
     for node in plan.nodes:

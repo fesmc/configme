@@ -132,7 +132,9 @@ def manifest_packages(project: Project) -> List[str]:
     pkgs = data.packages()
     if project.manifest_path.is_file():
         manifest = _load_toml(project.manifest_path)
-        names = list(manifest.get("deps", []))
+        # Entries may carry a ``:ref`` pin (e.g. "yelmo:climber-x"); the bare
+        # name is the package, the ref is read separately (see manifest_refs).
+        names = [data.split_ref(d)[0] for d in manifest.get("deps", [])]
         source = str(project.manifest_path)
     else:
         names = list(project.orchestrator.default_packages)
@@ -144,6 +146,26 @@ def manifest_packages(project: Project) -> List[str]:
             f"Supported: {', '.join(sorted(pkgs))}"
         )
     return names
+
+
+def manifest_refs(project: Project) -> Dict[str, str]:
+    """Component git refs the checkout's own manifest pins, via ``name:ref``
+    entries in ``deps`` (e.g. ``"yelmo:climber-x"``).
+
+    The manifest is the source of truth a package owner can edit (including to
+    point a component at a development branch); these pins override the
+    orchestrator's shipped defaults. Returns ``{name: ref}`` for pinned entries
+    only — a bare name carries no ref here and so falls back to the orchestrator
+    default at resolution time. An absent manifest yields no pins (``{}``)."""
+    if not project.manifest_path.is_file():
+        return {}
+    manifest = _load_toml(project.manifest_path)
+    refs: Dict[str, str] = {}
+    for dep in manifest.get("deps", []):
+        name, ref = data.split_ref(dep)
+        if ref:
+            refs[name] = ref
+    return refs
 
 
 # ----------------------------------------------------------- manifest authoring

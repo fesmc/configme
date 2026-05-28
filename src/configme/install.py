@@ -149,6 +149,26 @@ def _apply_component_refs(nodes: List[Node],
             n.ref = ref
 
 
+def _apply_manifest_refs(nodes: List[Node], project) -> None:
+    """Override node refs with the checkout manifest's own pins (``name:ref`` in
+    ``deps``). The manifest is authoritative — a package owner edits it to choose
+    the ref to build — so it wins over the orchestrator default already on the
+    node; bare manifest entries pin nothing and leave that default in place.
+
+    Call this once ``project`` (and thus the on-disk manifest) is known: in
+    ``config``/``upgrade`` after ``find_project``, and in ``install`` only after
+    the primary is cloned (its committed manifest does not exist until then)."""
+    if project is None:
+        return
+    refs = context.manifest_refs(project)
+    if not refs:
+        return
+    for n in nodes:
+        ref = refs.get(n.name)
+        if ref and n.clone:
+            n.ref = ref
+
+
 def build_plan(target: str, *, only: bool = False) -> Plan:
     """Resolve a target string into an ordered install/config Plan.
 
@@ -268,7 +288,7 @@ class Runner:
         """Clone ``node`` to ``dest`` and, if it pins a ref, check it out.
 
         When ``dest`` already exists and the node pins a ref, the ref is still
-        enforced (see ``_ensure_ref``) so the pin is authoritative on every
+        enforced (see ``ensure_ref``) so the pin is authoritative on every
         install, not just the first clone.
 
         Returns a status string:
@@ -293,8 +313,8 @@ class Runner:
             self.emit(f"(cd {dest} && git submodule update --init --recursive)")
         if dest.exists() and not self.overwrite:
             # Existing checkout: enforce a pinned ref (read-only probing in
-            # dry-run; _ensure_ref skips the actual checkout when dry_run).
-            return self._ensure_ref(node, dest) if node.ref else "exists"
+            # dry-run; ensure_ref skips the actual checkout when dry_run).
+            return self.ensure_ref(node, dest) if node.ref else "exists"
         if self.dry_run:
             return "dry"
         subprocess.run(["git", "clone", url, str(dest)], check=True)
@@ -305,17 +325,25 @@ class Runner:
                            cwd=dest, check=True)
         return "cloned"
 
-    def _ensure_ref(self, node: "Node", dest: Path) -> str:
-        """Bring an existing checkout onto the ref its orchestrator pins (e.g.
-        yelmo's ``climber-x`` branch). Returns: exists | switched | dirty.
+    def ensure_ref(self, node: "Node", dest: Path, *, confirm_fn=None) -> str:
+        """Bring an existing checkout onto its resolved ref (e.g. yelmo's
+        ``climber-x`` branch). Returns: exists | switched | dirty | declined.
 
         Already on the ref -> ``exists``. Uncommitted tracked changes -> the
         switch is skipped and reported (never clobbered), returning ``dirty``.
-        Otherwise the checkout is switched to the ref; a plain ``git checkout``
-        is tried first (offline-friendly when the ref is already fetched) and,
-        only if that fails, a ``git fetch`` + retry covers a ref created after
-        the original clone."""
-        if _git_branch(dest) == node.ref:
+
+        With no ``confirm_fn`` the switch is automatic (the ``install`` clone
+        phase: a freshly cloned/just-present tree has nothing to lose). With one
+        — the ``config``/``upgrade`` reconcile paths, where a working copy and a
+        possibly hand-edited manifest already exist — a clean branch mismatch is
+        offered as ``switch <pkg> from <cur> to <ref>?``; a declined prompt
+        leaves the checkout untouched (``declined``).
+
+        The switch itself tries a plain ``git checkout`` first (offline-friendly
+        when the ref is already fetched) and, only if that fails, a ``git fetch``
+        + retry covers a ref created after the original clone."""
+        current = _git_branch(dest)
+        if current == node.ref:
             return "exists"
         if _git_dirty(dest):
             self.emit(f"# {node.name}: uncommitted changes at {dest}; "
@@ -324,6 +352,10 @@ class Runner:
         self.emit(f"(cd {dest} && git checkout {node.ref})")
         if self.dry_run:
             return "switched"
+        if confirm_fn is not None and not confirm_fn(
+                f"switch {node.name} from {current or 'detached HEAD'} "
+                f"to {node.ref}?"):
+            return "declined"
         try:
             subprocess.run(["git", "checkout", node.ref], cwd=dest, check=True,
                            capture_output=True, text=True)
@@ -540,6 +572,14 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             print(f"  ! {plan.primary.name}: {e}")
             results["failed"].append(plan.primary.name)
 
+    # The primary is now on disk, so a manifest committed inside its repo (if
+    # any) can finally be read: its component ref pins override the orchestrator
+    # defaults already on the dep nodes, before those deps are cloned/checked
+    # out below. (On a fresh repo with no committed manifest this is a no-op and
+    # orchestrator defaults govern; configme writes its own bare manifest later.)
+    _apply_manifest_refs(plan.nodes, context.find_project(root) if root.exists()
+                         else None)
+
     for node in plan.nodes:
         if node.name == plan.primary.name:
             continue
@@ -683,6 +723,12 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
 
     # --- summary
     print("\nSummary:")
+    # List the components with a pinned-ref marker so a non-default branch (e.g.
+    # yelmo@climber-x) is obvious at a glance rather than buried in the clone log.
+    comp_labels = [f"{n.name}@{n.ref}" if n.ref and n.ref != "main" else n.name
+                   for n in plan.nodes if n.clone]
+    if comp_labels:
+        print(f"  components: {', '.join(comp_labels)}")
     for key in ("configured", "built", "linked", "pending",
                 "deferred", "skipped", "unavailable", "failed"):
         if results[key]:
@@ -747,6 +793,36 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
 
     results = {"updated": [], "configured": [], "built": [], "missing": [],
                "deferred": [], "skipped": [], "failed": []}
+
+    # --- ref reconcile phase: switch each existing checkout to its resolved ref
+    # *before* pulling and reconfiguring. The manifest pin (a package owner may
+    # have edited it) wins over the orchestrator default, and the Makefile
+    # template lives inside the checkout — so the ref must be correct first, and
+    # `git pull --ff-only` then advances the right branch. A clean mismatch is
+    # confirmed (default yes); a dirty or declined checkout is left untouched.
+    _apply_manifest_refs(plan.nodes, project)
+    runner.emit("\n# --- ref reconcile ---")
+    for node in plan.nodes:
+        if not node.ref or not node.clone:
+            continue
+        dest = dest_of(node, plan, root)
+        if not dest.is_dir():
+            continue
+        try:
+            st = runner.ensure_ref(node, dest, confirm_fn=confirm_fn)
+        except InstallError as e:
+            print(f"  ! {node.name}: {e}")
+            results["failed"].append(node.name)
+            continue
+        if st == "switched":
+            print(f"  ref {node.name}: switched to {node.ref}")
+        elif st == "dirty":
+            print(f"  ref {node.name}: dirty; not switched to {node.ref} (skipped)")
+            if node.name not in results["skipped"]:
+                results["skipped"].append(node.name)
+        elif st == "declined":
+            print(f"  ref {node.name}: kept current branch "
+                  f"(declined switch to {node.ref})")
 
     # --- pull phase (each checkout in place; a subpackage rides its parent's
     # checkout, so it has no separate pull but inherits the parent's updated flag)

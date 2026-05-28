@@ -103,6 +103,25 @@ missing**: a committed manifest is left untouched. They write a
 otherwise configme falls back to directory-name matching, then its own shipped
 seed manifest for that orchestrator.
 
+**Component ref pins.** A `deps` entry may pin a git ref with the same
+`name:ref` syntax the orchestrator uses (e.g. `"yelmo:climber-x"`). This lets a
+checkout — and the package owner editing it — declare the exact ref to build,
+including pointing a component at a development branch. Resolution precedence:
+the manifest pin **wins over** the orchestrator's shipped default
+(`component_refs`); a bare name carries no pin and falls back to that default
+(so removing a pin and re-running reverts to the canonical branch). The
+orchestrator default therefore only governs when no manifest ref is written.
+
+configme **reconciles** each checkout to its resolved ref before that package's
+Makefile is (re)generated — the Makefile template lives inside the checkout and
+can differ between refs, so the ref must be correct first. `install` switches a
+freshly cloned / just-present tree automatically and marks any non-`main` ref in
+its summary (e.g. `yelmo@climber-x`); `config` and `upgrade`, which act on an
+existing working copy with a possibly hand-edited manifest, **prompt** before
+switching a clean checkout (`switch <pkg> from <cur> to <ref>?`, default yes). A
+checkout with uncommitted tracked changes is never clobbered — the switch is
+skipped and reported.
+
 ---
 
 ## 4. Command surface
