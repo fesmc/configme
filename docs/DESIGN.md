@@ -131,6 +131,7 @@ configme install <target> [options]   # clone/use-existing + configure + link + 
 configme update [options]              # self-update: pip install -U configme
 configme upgrade [<target>] [options] # git pull existing checkouts + reconfigure
 configme config [<target>] [options]  # config-only: (re)generate Makefile(s)
+configme status [<target>] [options]  # read-only: what is present / still pending
 configme [-m M] [-c C]                # alias for `configme config` on the current dir
 configme show <name>                   # print a machine/compiler fragment to stdout
 configme new machine|compiler <name>   # scaffold a fragment from an existing one
@@ -203,6 +204,43 @@ it configures that package (+ the deps it needs, unless `--only`). Naming
 packages without the `config` verb (`configme yelmo`) is rejected with a hint,
 to keep it distinct from `configme install yelmo`; bare `configme` is an alias
 for `configme config` on the current directory.
+
+### `configme status [<target>]` (read-only inspection)
+
+Where `install`/`upgrade` report what a run just *did* (an action log of that
+invocation), `status` answers what is true on disk *now* — a property of the
+checkout, not of any run. It reconstructs the same `build_plan` and probes the
+disk, then reports per-component state across four categories:
+
+- **repo** — each cloned component is a real git checkout (`.git` present).
+  Optional components (e.g. climber-x's `bgc`/`vilma`) that are absent are
+  `pending`, not `missing`.
+- **link** — each inter-component build symlink resolves (`ok` / `broken` for a
+  dangling link / `missing` when the dep is on disk but unlinked / `pending`
+  when the dep itself is absent), reusing `install`'s link resolution.
+- **build** — each declared `[package.artifacts]` file exists, per variant. All
+  present is `ok`, none is `pending` (not built — possibly deferred on purpose),
+  some is `partial` (a genuinely half-finished build).
+- **extra** — each orchestrator extra is present: a `git_repo` (e.g. the
+  climber-x `input` data repo), a `data_link`, a `runme_config`. `pip_package`
+  is skipped (an installed pip package cannot be reliably probed from disk).
+
+The probe is **pure** — no clone, configure, link, build, prompt, or config
+write — and is driven entirely off the registry metadata that already drives
+`install`, so a new package/orchestrator/extra is covered with no extra code.
+By default only not-ok rows are shown (a fully-ok category collapses to a count;
+`-v` shows everything), and the report ends with the exact commands to run by
+hand for whatever is outstanding. Exit status is non-zero only for a hard
+problem (`missing`/`broken`/`partial`); `pending` (deferred) items do not fail.
+
+The same inspection (`status.pending_block`) is appended to the `install` and
+`config` summaries, so a routine run also surfaces pre-existing gaps — a skipped
+optional/data repo, an unmade link, a deferred build — without a separate
+command. The build-completeness probe relies on the per-package, variant-keyed
+`[package.artifacts]` table in the registry (§9), which lists the library files
+a finished build produces (paths relative to the package's checkout); it is
+build-style-agnostic, working the same for a `build.py` package (`fesm-utils`'s
+LIS + FFTW) and a `make` package (`fesm-utils/utils`'s `libfesmutils`).
 
 ---
 

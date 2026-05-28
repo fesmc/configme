@@ -13,6 +13,7 @@ fragments, and clone/link a whole stack with one command.
 configme install yelmox    # clone + configure + link (+ build) a whole stack
 configme upgrade yelmox    # git pull the stack + reconfigure (+ rebuild if changed)
 configme config yelmox     # (re)generate Makefiles for an already-present stack
+configme status yelmox     # report what is present and what is still pending (read-only)
 configme                   # (re)configure the current directory (orchestrator or package)
 configme show macbook      # print a machine (or compiler) fragment to copy/edit
 configme new machine mybox # scaffold a new machine fragment from linux, to edit
@@ -131,6 +132,40 @@ to you). Every package is then reconfigured; a package whose pull brought in new
 commits is also rebuilt when it is a build-it package (e.g. `fesm-utils`), gated
 exactly like `install` — `--build-deps` rebuilds without asking, otherwise you
 are prompted. Add `--dry-run` to preview the pulls and reconfigures.
+
+### Check what is still pending
+
+`configme status` is a **read-only** report of what is actually on disk versus
+what the plan expects — it never clones, configures, links, or builds. It shares
+the target grammar with `install`/`config` and answers the questions you have
+after a partial install: are all the repositories there (including optional and
+data ones that may have been skipped)? Are the inter-component links in place?
+Is `fesm-utils` built for every variant?
+
+```bash
+configme status            # the current checkout's primary + its deps
+configme status yelmox     # the whole yelmox stack
+configme status -v         # show every check, including the ones already ok
+```
+
+It groups checks into **repos**, **links**, **builds**, and **extras**, hides
+everything that is already in order, and ends with the exact commands to run by
+hand for whatever is left:
+
+```text
+  Builds:
+    [partial] fesm-utils (omp)  (missing fftw-omp/lib/libfftw3.a)  -> configme install fesm-utils --build-deps
+
+Run these when ready:
+  configme install fesm-utils --build-deps
+```
+
+The exit status is non-zero only for a genuine problem (a required repo missing,
+a symlink broken, a half-finished build); intentionally deferred items (a
+skipped optional repo, a data clone you postponed, an unbuilt variant) are shown
+as `pending` but do not fail. The same "still pending" block is appended to the
+`install` and `config` summaries, so a normal run also reminds you of anything
+outstanding.
 
 ### A machine configme doesn't know yet
 
