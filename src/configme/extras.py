@@ -91,7 +91,7 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
     if not account:
         accounts = _slurm_accounts()
         if accounts:
-            print(f"  available accounts: {', '.join(accounts)}")
+            print(f"  available hpc accounts: {', '.join(accounts)}")
         account = ask("hpc account for .runme_config")
     runner.emit("# runme_config: create .runme_config and set hpc/account")
     runner.emit("runme --config  # or: cp .runme/runme_config .runme_config")
