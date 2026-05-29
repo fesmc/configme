@@ -205,8 +205,12 @@ def _inspect_extras(plan, root: Path) -> List[Check]:
                 if link_path.is_symlink() or link_path.exists():
                     out.append(Check("extra", f"data_link {label}", _OK))
                 else:
+                    # A data link points at a site-specific path configme can't
+                    # know, so the resolving hint is the bare symlink command to
+                    # run by hand, not a `configme install` re-run.
                     out.append(Check("extra", f"data_link {label}", "pending",
-                                     detail="not linked", hint=install_hint))
+                                     detail="not linked",
+                                     hint=f"ln -s /path/to/{label} {link_path}"))
         elif name == "runme_config":
             if value:
                 if (root / ".runme_config").exists():
@@ -317,7 +321,7 @@ def pending_block(checks: List[Check]) -> str:
     notok = [c for c in checks if c.state != _OK]
     if not notok:
         return ""
-    lines = ["\nStill pending (configme status):"]
+    lines = ["\nCurrent status (configme status):"]
     for cat, title in _CATEGORY_TITLES:
         rows = [c for c in notok if c.category == cat]
         lines += ["  " + _format_row(c) for c in rows]

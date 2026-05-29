@@ -208,6 +208,6 @@ def test_pending_block_lists_problems_and_commands():
               status.Check("build", "fesm-utils (omp)", "pending",
                            hint="configme install fesm-utils --build-deps")]
     block = status.pending_block(checks)
-    assert "Still pending" in block
+    assert "Current status" in block
     assert "fesm-utils (omp)" in block
     assert "configme install fesm-utils --build-deps" in block

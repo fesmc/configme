@@ -242,6 +242,14 @@ a finished build produces (paths relative to the package's checkout); it is
 build-style-agnostic, working the same for a `build.py` package (`fesm-utils`'s
 LIS + FFTW) and a `make` package (`fesm-utils/utils`'s `libfesmutils`).
 
+`install` reuses the same probe before each build step: a package whose
+artifacts are all present is reported as already built and its rebuild prompt
+defaults to **no** (declining keeps the existing build rather than marking it
+deferred), so a re-run on a finished checkout neither prompts unnecessarily nor
+mislabels a built package as pending. `--build-deps` still forces a rebuild, and
+`upgrade` ignores the existing artifacts (it only builds after a pull that
+advanced HEAD, so they are stale by definition).
+
 ---
 
 ## 5. netCDF detection
@@ -494,7 +502,9 @@ Initial types (those yelmox needs today):
 - `pip_package` — `pip install -U` a command (e.g. `runme`); pip installs it if
   missing or upgrades it if out of date.
 - `runme_config` — create/patch `.runme_config` (hpc/account).
-- `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`).
+- `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`). An
+  existing link (or real dir) is kept untouched and not re-prompted; only a
+  missing one is asked for, so re-running on a configured tree is quiet.
 - `git_repo` — clone an auxiliary repo (any git host) into a named dir, e.g.
   climber-x's `input` from GitLab. Each entry is `{dir, org, repo, host?, ref?,
   protocol?}`; `host` defaults to GitHub, `ref` is checked out after cloning,

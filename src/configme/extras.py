@@ -124,6 +124,17 @@ def _data_link(value, runner, root: Path, cfg: dict, ask,
     labels = value if isinstance(value, list) else [value]
     done = []
     for label in labels:
+        link_path = root / label
+        # Already set up? Keep it and don't prompt — re-running an install on a
+        # configured tree should leave existing links alone. A dangling symlink
+        # still counts as "set up" (the user pointed it somewhere); just note the
+        # missing target rather than re-asking.
+        if link_path.is_symlink() or link_path.exists():
+            note = "" if link_path.exists() else " (target missing)"
+            runner.emit(f"# data_link {label}: {link_path} exists; keeping{note}")
+            print(f"  data_link {label}: {link_path} exists; keeping{note}")
+            done.append(f"{label}=exists")
+            continue
         path = cfg.get(label) or ask(f"path to {label}", complete_paths=True)
         runner.emit(f"# data_link {label}: ln -s <path> {label}")
         if not path:
@@ -134,14 +145,9 @@ def _data_link(value, runner, root: Path, cfg: dict, ask,
         # resolved, made absolute from the filesystem root) so they stay valid
         # regardless of where the link is later read from.
         target = Path(os.path.expandvars(os.path.expanduser(path))).resolve()
-        link_path = root / label
         runner.emit(f"ln -s {target} {label}")
         if runner.dry_run:
             print(f"  data_link {label}: (dry) {link_path} -> {target}")
-            continue
-        if link_path.is_symlink() or link_path.exists():
-            print(f"  data_link {label}: {link_path} exists; skipping")
-            done.append(f"{label}=exists")
             continue
         link_path.symlink_to(target)
         msg = "" if target.exists() else " (target missing)"

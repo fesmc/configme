@@ -733,7 +733,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         print(f"\n  + wrote {install_sh}")
 
     # --- summary
-    print("\nSummary:")
+    print("\nThis run:")
     # List the components with a pinned-ref marker so a non-default branch (e.g.
     # yelmo@climber-x) is obvious at a glance rather than buried in the clone log.
     comp_labels = [f"{n.name}@{n.ref}" if n.ref and n.ref != "main" else n.name
@@ -898,7 +898,8 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
                                     is_orchestrator=False, **common_kw)
             if was_updated:
                 _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                               info, results, confirm_fn)
+                               info, results, confirm_fn,
+                               prefer_skip_if_built=False)
             elif dest.is_dir():
                 print(f"  - {node.name}: unchanged; skipping rebuild")
             continue
@@ -911,7 +912,8 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
         if node.build is not None:
             if was_updated:
                 _build_make_package(runner, node, dest, build_deps,
-                                    confirm_fn, results)
+                                    confirm_fn, results,
+                                    prefer_skip_if_built=False)
             elif dest.is_dir():
                 print(f"  - {node.name}: unchanged; skipping rebuild")
 
@@ -929,7 +931,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
         print(f"\n  + wrote {upgrade_sh}")
 
     # --- summary
-    print("\nSummary:")
+    print("\nThis run:")
     for key in ("updated", "configured", "built", "missing",
                 "deferred", "skipped", "failed"):
         if results[key]:
@@ -937,8 +939,31 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     return 1 if results["failed"] else 0
 
 
+def _artifacts_state(name: str, dest: Path) -> str:
+    """Probe a package's declared ``[package.artifacts]`` under ``dest`` to tell
+    whether it is already built. Returns one of:
+
+      ``built``    every artifact of every variant is present
+      ``partial``  some but not all are present (a half-finished build)
+      ``unbuilt``  none present
+      ``none``     the package declares no artifacts (can't tell — assume unbuilt)
+
+    Mirrors the per-variant probe in ``status._inspect_builds`` but aggregates
+    across variants, so the build step can skip an already-built package on an
+    idempotent re-run (see ``_emit_build_py`` / ``_build_make_package``)."""
+    pkg = data.packages().get(name)
+    if pkg is None or not pkg.artifacts:
+        return "none"
+    paths = [p for variant_paths in pkg.artifacts.values() for p in variant_paths]
+    present = sum(1 for p in paths if (dest / p).exists())
+    if present == 0:
+        return "unbuilt"
+    return "built" if present == len(paths) else "partial"
+
+
 def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
-                   results, confirm_fn=None, followups=None):
+                   results, confirm_fn=None, followups=None, *,
+                   prefer_skip_if_built=True):
     """fesm-utils-style package: print/run its build.py (see issue #7).
 
     The build runs autotools and is slow (~10-30 min), so it is not run
@@ -970,14 +995,33 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
         _defer()
         return
 
+    # On an idempotent re-run an already-built package needs nothing; only an
+    # explicit --build-deps (or a confirmed prompt) rebuilds it. Upgrade passes
+    # prefer_skip_if_built=False because it only reaches here after a pull that
+    # advanced HEAD, so the existing artifacts are stale and must be rebuilt.
+    state = _artifacts_state(node.name, dest)
+    already_built = prefer_skip_if_built and state == "built"
+
     do_build = build_deps
     if not do_build and confirm_fn is not None:
-        print(f"  {node.name} needs an autotools build (slow, ~10-30 min):")
-        print(f"      (cd {dest} && {cmd})")
-        do_build = confirm_fn(f"Build {node.name} now?", True)
+        if already_built:
+            print(f"  {node.name}: already built.")
+            print(f"      (cd {dest} && {cmd})")
+            do_build = confirm_fn(f"Rebuild {node.name}?", False)
+        else:
+            if state == "partial":
+                print(f"  {node.name}: build incomplete; rebuilding recommended.")
+            print(f"  {node.name} needs an autotools build (slow, ~10-30 min):")
+            print(f"      (cd {dest} && {cmd})")
+            do_build = confirm_fn(f"Build {node.name} now?", True)
 
     if not do_build:
-        _defer()
+        if already_built:
+            # Kept as-is: it is built, not a deferred/pending step.
+            print(f"  - {node.name}: keeping existing build")
+            results["built"].append(node.name)
+        else:
+            _defer()
         return
 
     print(f"  building {node.name}: {cmd}")
@@ -996,7 +1040,7 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
 
 
 def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
-                        followups=None):
+                        followups=None, *, prefer_skip_if_built=True):
     """Compile a package whose build configme owns (`[package.build]`), once per
     variant: ``make openmp=<0|1> <make_target>``. Runs in the inherited shell
     environment (the Makefile already carries the configme-resolved compiler /
@@ -1025,12 +1069,27 @@ def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
         _defer("configured")
         return
 
+    # See _emit_build_py: skip an already-built package on a re-run; upgrade
+    # passes prefer_skip_if_built=False so a post-pull rebuild still happens.
+    state = _artifacts_state(node.name, dest)
+    already_built = prefer_skip_if_built and state == "built"
+
     do_build = build_deps
     if not do_build and confirm_fn is not None:
-        print(f"  {node.name} needs a make build ({', '.join(spec.variants)}):")
-        do_build = confirm_fn(f"Build {node.name} now?", True)
+        if already_built:
+            print(f"  {node.name}: already built ({', '.join(spec.variants)}).")
+            do_build = confirm_fn(f"Rebuild {node.name}?", False)
+        else:
+            if state == "partial":
+                print(f"  {node.name}: build incomplete; rebuilding recommended.")
+            print(f"  {node.name} needs a make build ({', '.join(spec.variants)}):")
+            do_build = confirm_fn(f"Build {node.name} now?", True)
     if not do_build:
-        _defer("build deferred")
+        if already_built:
+            print(f"  - {node.name}: keeping existing build")
+            results["built"].append(node.name)
+        else:
+            _defer("build deferred")
         return
 
     for variant, cmd in cmds:

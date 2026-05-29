@@ -406,7 +406,7 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
             config_subdir=node.config_subdir,
             is_orchestrator=node.is_orchestrator, **common_kw)
 
-    print("\nSummary:")
+    print("\nThis run:")
     for key in ("configured", "skipped", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
