@@ -372,19 +372,26 @@ class Runner:
 
     def pull(self, node: "Node", dest: Path) -> Tuple[str, bool]:
         """Update an existing checkout in place. Returns ``(status, updated)``
-        where status is one of: missing | dirty | dry | up-to-date | updated, and
-        ``updated`` is True only when the pull advanced HEAD (new commits).
+        where status is one of: missing | dirty | detached | dry | up-to-date |
+        updated, and ``updated`` is True only when the pull advanced HEAD (new
+        commits).
 
         Uses ``git pull --ff-only`` on whatever branch is checked out: a clean
         fast-forward succeeds, anything else (diverged branch, no upstream) is
         reported for the user to resolve by hand — never merged or clobbered.
-        A checkout with uncommitted tracked changes is skipped, not touched."""
+        A checkout with uncommitted tracked changes is skipped, not touched.
+        A detached HEAD (pinned tag or commit) is skipped: there is no branch
+        to fast-forward, and the pin is exactly what the user asked for."""
         if not dest.is_dir():
             self.emit(f"# {node.name}: not present at {dest} (skipped)")
             return "missing", False
         if _git_dirty(dest):
             self.emit(f"# {node.name}: uncommitted changes at {dest} (skipped)")
             return "dirty", False
+        if _git_branch(dest) is None:
+            self.emit(f"# {node.name}: detached HEAD at {dest} "
+                      f"(pinned ref; no pull)")
+            return "detached", False
         self.emit(f"(cd {dest} && git pull --ff-only)")
         if self.dry_run:
             return "dry", False
