@@ -83,9 +83,15 @@ def cmd_list(args: argparse.Namespace) -> int:
     else:
         print("  (none)")
 
+    print("\nTools:")
+    if _PIP_TOOLS:
+        for name in _PIP_TOOLS:
+            print(f"  {name:14s} fesmc/{name}")
+    else:
+        print("  (none)")
+
     print("\nMachines: " + (", ".join(machines) if machines else "(none)"))
     print("Compilers: " + (", ".join(compilers) if compilers else "(none)"))
-    print("Tools: " + (", ".join(_PIP_TOOLS) if _PIP_TOOLS else "(none)"))
     return 0
 
 
