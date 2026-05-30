@@ -7,6 +7,7 @@ Command surface (see docs/DESIGN.md sec. 4)::
     configme upgrade [<target>] [options] git pull + reconfigure (+ rebuild if changed)
     configme config [<target>] [options]  config-only: (re)generate Makefile(s)
     configme status [<target>] [options]  read-only: what is present / still pending
+    configme git <git args...> [options]  fan-out a git command across each managed repo
     configme [-m M] [-c C]                alias for `configme config` on the current dir
     configme show <name>                   print a machine/compiler fragment to stdout
     configme new machine|compiler <name>   scaffold a fragment from an existing one
@@ -29,12 +30,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from configme import __version__, context, data, generate, install, netcdf, status
+from configme import (__version__, context, data, generate, install, netcdf,
+                      status)
+from configme import git as git_mod
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
 # configures the current orchestrator; name packages with `configme config`.
 VERBS = {"install", "update", "upgrade", "config", "show", "new", "netcdf",
-         "init", "list", "status"}
+         "init", "list", "status", "git"}
 
 # Standalone tools `configme install <name>` shortcuts to a `pip install -U` of,
 # rather than treating as a managed model package (no clone/configure/link/
@@ -595,6 +598,19 @@ def cmd_update(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_git(args: argparse.Namespace) -> int:
+    """`configme git <git args...>` — run the same git command in each managed
+    repository, one at a time, with a Y/n prompt before each invocation.
+
+    The git argv is fully pass-through (no allowlist): the per-repo
+    confirmation is the safety gate. With no ``--target``, operates on the
+    current orchestrator/package (same resolution as ``upgrade``/``status``);
+    ``--repos`` narrows the run to a comma-separated subset of managed repos."""
+    target = args.target or _bare_target(Path.cwd())
+    return git_mod.run_git(target, list(args.args or []),
+                           repos=args.repos, yes=args.yes, confirm_fn=_confirm)
+
+
 def cmd_upgrade(args: argparse.Namespace) -> int:
     """`configme upgrade [target]` — git pull existing checkouts + reconfigure
     with the same machine/compiler as before. With no target, upgrades the
@@ -732,6 +748,27 @@ def _build_parser() -> argparse.ArgumentParser:
     p_upgrade.add_argument("--dry-run", action="store_true")
     p_upgrade.set_defaults(func=cmd_upgrade)
 
+    p_git = sub.add_parser(
+        "git", help="run the same git command on each managed repo, with a "
+        "Y/n prompt per repo")
+    p_git.add_argument("--target", default=None,
+                       help="orchestrator or package whose repo set to use "
+                       "(default: the current directory's)")
+    p_git.add_argument("--repos", default=None,
+                       help="comma-separated subset of managed repo names to "
+                       "operate on (default: all)")
+    p_git.add_argument("-y", "--yes", action="store_true",
+                       help="skip the per-repo Y/n prompt (one-way). Read-only "
+                       "git verbs (status, log, diff, fetch, ...) auto-confirm "
+                       "anyway; this extends the same to any verb.")
+    # REMAINDER captures everything after the first non-option token verbatim,
+    # so git's own flags (`--ff-only`, `-s`, `--decorate`) reach git intact and
+    # don't get eaten by configme's parser.
+    p_git.add_argument("args", nargs=argparse.REMAINDER,
+                       help="git subcommand and its arguments (e.g. status, "
+                       "pull --ff-only, log -1 --decorate)")
+    p_git.set_defaults(func=cmd_git)
+
     return parser
 
 
@@ -779,7 +816,7 @@ def main(argv=None) -> int:
         _report_pending(e)
         return 2
     except (data.DataError, context.ProjectError, generate.GenerateError,
-            install.InstallError, netcdf.NetcdfError) as e:
+            install.InstallError, netcdf.NetcdfError, git_mod.GitError) as e:
         print(f"configme: {e}", file=sys.stderr)
         return 1
 
