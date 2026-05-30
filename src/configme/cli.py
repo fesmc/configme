@@ -750,7 +750,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_git = sub.add_parser(
         "git", help="run the same git command on each managed repo, with a "
-        "Y/n prompt per repo")
+        "Y/n prompt per repo (configme's own flags — --target/--repos/--yes "
+        "— may appear before or after the git subcommand)")
     p_git.add_argument("--target", default=None,
                        help="orchestrator or package whose repo set to use "
                        "(default: the current directory's)")
@@ -772,8 +773,58 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Flags the `git` subparser owns. The first set takes a value (`--target X`
+# or `--target=X`); the second is a boolean switch. Listed here (not derived
+# from the parser) because we hoist them out of argv before argparse runs —
+# argparse.REMAINDER on the `git` subparser stops option parsing at the first
+# non-option token (the git subcommand), so any of these flags appearing after
+# it would be silently passed through to `git` as positional arguments.
+_GIT_VALUE_FLAGS = frozenset({"--target", "--repos"})
+_GIT_BOOL_FLAGS = frozenset({"-y", "--yes"})
+
+
+def _hoist_git_flags(argv: list) -> list:
+    """Make `configme git`'s own flags position-insensitive.
+
+    Returns a new argv with any ``--target``/``--repos``/``-y``/``--yes``
+    occurrences moved to immediately after the ``git`` verb, preserving the
+    relative order of everything else. A no-op on argvs whose verb is not
+    ``git``. None of these flag names collide with options used by any current
+    git subcommand, so the hoist is safe in practice; a future collision would
+    show up as a flag silently consumed by configme instead of git."""
+    if not argv or argv[0] != "git":
+        return argv
+    hoisted: list = []
+    leftover: list = []
+    i = 1  # skip the verb itself
+    while i < len(argv):
+        tok = argv[i]
+        key = tok.split("=", 1)[0]
+        if tok in _GIT_BOOL_FLAGS:
+            hoisted.append(tok)
+            i += 1
+        elif tok in _GIT_VALUE_FLAGS:
+            # Take the next token as the value; if it's missing, leave the bare
+            # flag where argparse will report a clear "expected one argument".
+            if i + 1 < len(argv):
+                hoisted.extend([tok, argv[i + 1]])
+                i += 2
+            else:
+                leftover.append(tok)
+                i += 1
+        elif key in _GIT_VALUE_FLAGS or key in _GIT_BOOL_FLAGS:
+            # --flag=value form is self-contained, no follow-up token.
+            hoisted.append(tok)
+            i += 1
+        else:
+            leftover.append(tok)
+            i += 1
+    return ["git"] + hoisted + leftover
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    argv = _hoist_git_flags(argv)
     parser = _build_parser()
 
     # Bare form: `configme [-m M] [-c C]` (no verb, no targets) configures the
