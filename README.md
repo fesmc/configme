@@ -184,6 +184,23 @@ You don't even have to run `new` first: if you pass an unknown machine to
 `linux` on the spot. Once your fragment works well, please consider
 contributing it back to configme so others can reuse it.
 
+### Standalone tools
+
+A few standalone fesmc tools that aren't model packages can still be installed
+through `configme install` as a convenience — currently just
+[`runme`](https://github.com/fesmc/runme):
+
+```bash
+configme install runme            # pip install -U git+https://github.com/fesmc/runme
+configme install runme --dry-run  # print the pip command without running it
+```
+
+This is exactly the same install the `pip_package` orchestrator extra does
+automatically as part of `configme install yelmox` / `climber-x`; the standalone
+form is handy when you want to install or update `runme` on its own. Other
+`install` flags (`-m`/`-c`/`--dir`/`-d`/`--build-deps`) don't apply and are
+ignored. `configme list` shows the available tools under **Tools:**.
+
 ## For configme developers
 
 To work on configme itself, clone it and install in editable mode so your

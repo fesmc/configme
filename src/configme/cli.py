@@ -36,6 +36,13 @@ from configme import __version__, context, data, generate, install, netcdf, stat
 VERBS = {"install", "update", "upgrade", "config", "show", "new", "netcdf",
          "init", "list", "status"}
 
+# Standalone tools `configme install <name>` shortcuts to a `pip install -U` of,
+# rather than treating as a managed model package (no clone/configure/link/
+# build). These are convenience helpers — `runme` in particular is reused by
+# the `pip_package` orchestrator extra, so this just gives users a direct verb
+# for the same install when they want it standalone. Kept deliberately tiny.
+_PIP_TOOLS = ("runme",)
+
 
 # ----------------------------------------------------------------- not-yet-impl
 
@@ -78,6 +85,7 @@ def cmd_list(args: argparse.Namespace) -> int:
 
     print("\nMachines: " + (", ".join(machines) if machines else "(none)"))
     print("Compilers: " + (", ".join(compilers) if compilers else "(none)"))
+    print("Tools: " + (", ".join(_PIP_TOOLS) if _PIP_TOOLS else "(none)"))
     return 0
 
 
@@ -520,7 +528,31 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _install_pip_tool(name: str, *, dry_run: bool) -> int:
+    """`configme install <tool>` for a tool in ``_PIP_TOOLS``: shortcut to
+    ``pip install -U git+https://github.com/fesmc/<tool>``, the same URL the
+    ``pip_package`` orchestrator extra uses. Other ``install`` flags
+    (``-m``/``-c``/``--dir``/``--build-deps``/``-d``) do not apply and are
+    ignored — this is purely a pip shellout, not a managed-package install."""
+    url = f"git+https://github.com/fesmc/{name}"
+    cmd = [sys.executable, "-m", "pip", "install", "-U", url]
+    if dry_run:
+        print("DRY RUN — no changes will be made.")
+        print(f"  would run: {' '.join(cmd)}")
+        return 0
+    print(f"configme install {name}")
+    print(f"  running: {' '.join(cmd)}")
+    try:
+        subprocess.run(cmd, check=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"configme: pip install {name} failed: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_install(args: argparse.Namespace) -> int:
+    if args.target in _PIP_TOOLS:
+        return _install_pip_tool(args.target, dry_run=args.dry_run)
     return install.run_install(
         args.target,
         download=args.download,
