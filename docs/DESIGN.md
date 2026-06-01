@@ -501,8 +501,8 @@ Initial types (those yelmox needs today):
 
 - `pip_package` — `pip install -U` a command (e.g. `runme`); pip installs it if
   missing or upgrades it if out of date.
-- `runme_config` — `runme config init` (seeds `.runme/config.json` from
-  `.runme/config.default.json`), then patch `hpc`/`account` in place.
+- `runme_config` — `runme config init` (seeds `.runme/config.toml` from
+  `.runme/config.default.toml`), then patch `hpc`/`account` in place.
 - `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`). An
   existing link (or real dir) is kept untouched and not re-prompted; only a
   missing one is asked for, so re-running on a configured tree is quiet.

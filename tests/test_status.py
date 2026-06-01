@@ -166,16 +166,16 @@ def test_data_link_extra_pending_then_ok(tmp_path):
 
 
 def test_runme_config_extra_pending_then_ok(tmp_path):
-    """The runme_config extra is ``pending`` until `.runme/config.json` exists
+    """The runme_config extra is ``pending`` until `.runme/config.toml` exists
     (the path `runme config init` creates), then flips to ``ok``."""
     plan = install.build_plan("yelmox")
     checks = status.inspect(plan, tmp_path)
     rc = by_name(checks, "extra")["runme_config"]
     assert rc.state == "pending"
-    assert ".runme/config.json" in rc.detail
+    assert ".runme/config.toml" in rc.detail
 
     (tmp_path / ".runme").mkdir()
-    (tmp_path / ".runme" / "config.json").write_text("{}")
+    (tmp_path / ".runme" / "config.toml").write_text("")
     checks = status.inspect(plan, tmp_path)
     assert state_of(checks, "extra", "runme_config") == "ok"
 

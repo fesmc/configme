@@ -1,32 +1,37 @@
 """Tests for the `runme_config` extra (see extras._runme_config).
 
-The handler delegates `.runme/config.json` creation to `runme config init` and
+The handler delegates `.runme/config.toml` creation to `runme config init` and
 then regex-patches `hpc`/`account` in place. Tests mock `subprocess.run` so they
-never touch the real `runme` tool: the mock writes a fixture `config.json` with
+never touch the real `runme` tool: the mock writes a fixture `config.toml` with
 CHANGEME placeholders that the patch step rewrites.
 """
 
-import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from configme import extras, install
 
+if sys.version_info >= (3, 11):
+    import tomllib
+else:                                        # pragma: no cover - py3.8-3.10
+    import tomli as tomllib
 
-# A `.runme/config.json` as freshly created by `runme config init` —
+
+# A `.runme/config.toml` as freshly created by `runme config init` —
 # placeholders are present so the regex patch has something to substitute.
-_FRESH_CONFIG = {
-    "hpc": "CHANGEME",
-    "account": "CHANGEME",
-    "queue": "short",
-}
+_FRESH_CONFIG = '''\
+hpc = "CHANGEME"
+account = "CHANGEME"
+queue = "short"
+'''
 
 
 def _ask_factory(answers=None):
-    """Build an `ask` callable that returns canned answers in order, asserting
-    on the label so tests fail loudly if an unexpected prompt is issued."""
+    """Build an `ask` callable that returns canned answers in order, recording
+    each call so tests can assert the prompt label/default."""
     answers = list(answers or [])
     calls = []
 
@@ -38,7 +43,7 @@ def _ask_factory(answers=None):
     return ask
 
 
-def _writing_subprocess_run(dst: Path, payload=None):
+def _writing_subprocess_run(dst: Path, payload: str = _FRESH_CONFIG):
     """Return a fake `subprocess.run` that writes `payload` to `dst` and records
     the invocation — mimics a successful `runme config init`."""
     seen = {}
@@ -48,7 +53,7 @@ def _writing_subprocess_run(dst: Path, payload=None):
         seen["cwd"] = cwd
         seen["check"] = check
         dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_text(json.dumps(payload or _FRESH_CONFIG, indent=2))
+        dst.write_text(payload)
 
     fake.seen = seen
     return fake
@@ -69,7 +74,7 @@ def test_dry_run_emits_command_without_shelling_out(tmp_path, monkeypatch):
 
     assert out == "dry"
     assert called == []                                  # no subprocess
-    assert not (tmp_path / ".runme" / "config.json").exists()
+    assert not (tmp_path / ".runme" / "config.toml").exists()
     assert "runme config init" in "\n".join(runner.log)
 
 
@@ -86,9 +91,9 @@ def test_value_false_is_a_noop(tmp_path):
 # --------------------------------------------------------------- happy path
 
 def test_happy_path_runs_init_and_patches_placeholders(tmp_path, monkeypatch):
-    """`runme config init` is invoked in `cwd=root` and the resulting JSON has
+    """`runme config init` is invoked in `cwd=root` and the resulting TOML has
     its CHANGEME hpc/account patched to the prompted values."""
-    dst = tmp_path / ".runme" / "config.json"
+    dst = tmp_path / ".runme" / "config.toml"
     fake = _writing_subprocess_run(dst)
     monkeypatch.setattr(extras.subprocess, "run", fake)
     runner = install.Runner(dry_run=False)
@@ -101,7 +106,7 @@ def test_happy_path_runs_init_and_patches_placeholders(tmp_path, monkeypatch):
     assert fake.seen["cmd"] == ["runme", "config", "init"]
     assert fake.seen["cwd"] == tmp_path
     assert fake.seen["check"] is True
-    cfg = json.loads(dst.read_text())
+    cfg = tomllib.loads(dst.read_text())
     assert cfg["hpc"] == "mymachine"
     assert cfg["account"] == "myaccount"
     assert cfg["queue"] == "short"                # untouched
@@ -110,7 +115,7 @@ def test_happy_path_runs_init_and_patches_placeholders(tmp_path, monkeypatch):
 def test_machine_default_used_for_hpc_prompt(tmp_path, monkeypatch):
     """The resolved machine name is offered as the default for the hpc prompt
     so a user who is configuring for the current machine need not retype it."""
-    dst = tmp_path / ".runme" / "config.json"
+    dst = tmp_path / ".runme" / "config.toml"
     monkeypatch.setattr(extras.subprocess, "run",
                         _writing_subprocess_run(dst))
     runner = install.Runner(dry_run=False)
@@ -119,13 +124,13 @@ def test_machine_default_used_for_hpc_prompt(tmp_path, monkeypatch):
     extras._runme_config(True, runner, tmp_path, cfg={}, ask=ask,
                         machine="brigit")
 
-    assert ask.calls[0][0] == "hpc name for .runme/config.json"
+    assert ask.calls[0][0] == "hpc name for .runme/config.toml"
     assert ask.calls[0][1] == "brigit"            # default = machine
 
 
 def test_cfg_values_bypass_prompts(tmp_path, monkeypatch):
     """When cfg already carries hpc/account the handler must not prompt."""
-    dst = tmp_path / ".runme" / "config.json"
+    dst = tmp_path / ".runme" / "config.toml"
     monkeypatch.setattr(extras.subprocess, "run",
                         _writing_subprocess_run(dst))
     runner = install.Runner(dry_run=False)
@@ -138,20 +143,45 @@ def test_cfg_values_bypass_prompts(tmp_path, monkeypatch):
                                ask=ask)
 
     assert out == "ok"
-    cfg = json.loads(dst.read_text())
+    cfg = tomllib.loads(dst.read_text())
     assert cfg["hpc"] == "cfgmach"
     assert cfg["account"] == "cfgacct"
+
+
+def test_patch_anchored_to_line_start(tmp_path, monkeypatch):
+    """A stray `hpc = "x"` substring inside another value must not be matched —
+    only a real line-start `hpc =` is patched. This guards against the regex
+    accidentally rewriting comments or nested values."""
+    payload = '''\
+hpc = "CHANGEME"
+account = "CHANGEME"
+note = "do not rewrite: hpc = \\"trap\\""
+'''
+    dst = tmp_path / ".runme" / "config.toml"
+    monkeypatch.setattr(extras.subprocess, "run",
+                        _writing_subprocess_run(dst, payload=payload))
+    runner = install.Runner(dry_run=False)
+
+    extras._runme_config(True, runner, tmp_path,
+                        cfg={"hpc": "real", "account": "acct"},
+                        ask=_ask_factory())
+
+    text = dst.read_text()
+    assert 'hpc = "real"' in text
+    assert 'account = "acct"' in text
+    # The decoy inside `note` must be untouched.
+    assert 'hpc = \\"trap\\"' in text
 
 
 # --------------------------------------------------------------- idempotence
 
 def test_existing_config_is_not_reinitialized_but_is_repatched(
         tmp_path, monkeypatch):
-    """An existing `.runme/config.json` is not regenerated (no `runme config
+    """An existing `.runme/config.toml` is not regenerated (no `runme config
     init` call), but the patch step still runs so hpc/account stay current."""
-    dst = tmp_path / ".runme" / "config.json"
+    dst = tmp_path / ".runme" / "config.toml"
     dst.parent.mkdir()
-    dst.write_text(json.dumps({"hpc": "old", "account": "old"}))
+    dst.write_text('hpc = "old"\naccount = "old"\n')
 
     called = []
     monkeypatch.setattr(extras.subprocess, "run",
@@ -163,7 +193,7 @@ def test_existing_config_is_not_reinitialized_but_is_repatched(
                         ask=_ask_factory())
 
     assert called == []                          # init was skipped
-    cfg = json.loads(dst.read_text())
+    cfg = tomllib.loads(dst.read_text())
     assert cfg == {"hpc": "new", "account": "newacct"}
 
 
@@ -181,7 +211,7 @@ def test_init_failure_returns_failed(tmp_path, monkeypatch):
                                cfg={"hpc": "h", "account": "a"},
                                ask=_ask_factory())
     assert out == "failed"
-    assert not (tmp_path / ".runme" / "config.json").exists()
+    assert not (tmp_path / ".runme" / "config.toml").exists()
 
 
 def test_init_produced_no_file_returns_skipped(tmp_path, monkeypatch):

@@ -7,7 +7,7 @@ an interactive prompt; nothing site-specific is shipped.
 
 Handlers:
     pip_package = ["runme", ...]   pip install -U (install or update via pip)
-    runme_config = true            `runme config init` + patch .runme/config.json
+    runme_config = true            `runme config init` + patch .runme/config.toml
                                    (hpc/account)
     data_link = ["ice_data", ...]  symlink runtime data dirs
     git_repo = [{dir, org, repo, host?, ref?}, ...]
@@ -81,10 +81,10 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
                   confirm=None, followups=None, machine: Optional[str] = None) -> str:
     if not value:
         return ""
-    dst = root / ".runme" / "config.json"
+    dst = root / ".runme" / "config.toml"
     # The runme ``hpc`` is the machine name; default it to the machine this
     # install/config already resolved, so it need not be retyped when correct.
-    hpc = cfg.get("hpc") or ask("hpc name for .runme/config.json", default=machine)
+    hpc = cfg.get("hpc") or ask("hpc name for .runme/config.toml", default=machine)
     # The account is too case-specific to default, but list the accounts the
     # user may submit under (best-effort, Slurm-only) as a hint before asking.
     account = cfg.get("account")
@@ -92,12 +92,12 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
         accounts = _slurm_accounts()
         if accounts:
             print(f"  available hpc accounts: {', '.join(accounts)}")
-        account = ask("hpc account for .runme/config.json")
-    # `runme config init` is the canonical way to seed `.runme/config.json`
-    # (it copies `.runme/config.default.json` and stamps in defaults); we then
+        account = ask("hpc account for .runme/config.toml")
+    # `runme config init` is the canonical way to seed `.runme/config.toml`
+    # (it copies `.runme/config.default.toml` and stamps in defaults); we then
     # patch hpc/account in place. We don't carry our own template anymore.
     init_cmd = ["runme", "config", "init"]
-    runner.emit("# runme_config: seed .runme/config.json and set hpc/account")
+    runner.emit("# runme_config: seed .runme/config.toml and set hpc/account")
     runner.emit(" ".join(init_cmd))
     if runner.dry_run:
         print(f"  runme_config: (dry) would run `{' '.join(init_cmd)}` to "
@@ -119,11 +119,15 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
         print(f"  runme_config: created {dst}")
     if dst.exists() and (hpc or account):
         text = dst.read_text()
+        # TOML form: ``hpc = "value"`` / ``account = "value"``. Anchored on
+        # line start (re.MULTILINE) so a stray `hpc` substring inside another
+        # value cannot be matched.
         if hpc:
-            text = re.sub(r'("hpc"\s*:\s*")[^"]*(")', rf'\g<1>{hpc}\g<2>', text)
+            text = re.sub(r'^(\s*hpc\s*=\s*")[^"]*(")', rf'\g<1>{hpc}\g<2>',
+                          text, flags=re.MULTILINE)
         if account:
-            text = re.sub(r'("account"\s*:\s*")[^"]*(")',
-                          rf'\g<1>{account}\g<2>', text)
+            text = re.sub(r'^(\s*account\s*=\s*")[^"]*(")',
+                          rf'\g<1>{account}\g<2>', text, flags=re.MULTILINE)
         dst.write_text(text)
         print(f"  runme_config: set hpc={hpc or '(unset)'}, "
               f"account={account or '(unset)'}")

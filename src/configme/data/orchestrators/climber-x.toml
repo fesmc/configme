@@ -40,7 +40,7 @@ vilma = "src/vilma"
 # Typed post-config extras (see docs/DESIGN.md sec. 12).
 [orchestrator.extras]
 pip_package = ["runme"]       # install the `runme` command if missing
-runme_config = true           # `runme config init` + patch .runme/config.json
+runme_config = true           # `runme config init` + patch .runme/config.toml
 
 # CLIMBER-X input data lives in a separate GitLab repo (large files), cloned
 # into ./input. Pinned to HTTPS: the GitLab host uses a separate login that is
