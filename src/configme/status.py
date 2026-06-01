@@ -213,11 +213,12 @@ def _inspect_extras(plan, root: Path) -> List[Check]:
                                      hint=f"ln -s /path/to/{label} {link_path}"))
         elif name == "runme_config":
             if value:
-                if (root / ".runme_config").exists():
+                if (root / ".runme" / "config.json").exists():
                     out.append(Check("extra", "runme_config", _OK))
                 else:
                     out.append(Check("extra", "runme_config", "pending",
-                                     detail="not created", hint=install_hint))
+                                     detail=".runme/config.json not created",
+                                     hint=install_hint))
     return out
 
 

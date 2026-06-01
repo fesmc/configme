@@ -165,6 +165,21 @@ def test_data_link_extra_pending_then_ok(tmp_path):
     assert state_of(checks, "extra", "data_link ice_data") == "ok"
 
 
+def test_runme_config_extra_pending_then_ok(tmp_path):
+    """The runme_config extra is ``pending`` until `.runme/config.json` exists
+    (the path `runme config init` creates), then flips to ``ok``."""
+    plan = install.build_plan("yelmox")
+    checks = status.inspect(plan, tmp_path)
+    rc = by_name(checks, "extra")["runme_config"]
+    assert rc.state == "pending"
+    assert ".runme/config.json" in rc.detail
+
+    (tmp_path / ".runme").mkdir()
+    (tmp_path / ".runme" / "config.json").write_text("{}")
+    checks = status.inspect(plan, tmp_path)
+    assert state_of(checks, "extra", "runme_config") == "ok"
+
+
 def test_git_repo_data_extra_pending_with_clone_hint():
     # climber-x clones an `input` data repo via a git_repo extra.
     plan = install.build_plan("climber-x")

@@ -7,7 +7,8 @@ an interactive prompt; nothing site-specific is shipped.
 
 Handlers:
     pip_package = ["runme", ...]   pip install -U (install or update via pip)
-    runme_config = true            create/patch .runme_config (hpc/account)
+    runme_config = true            `runme config init` + patch .runme/config.json
+                                   (hpc/account)
     data_link = ["ice_data", ...]  symlink runtime data dirs
     git_repo = [{dir, org, repo, host?, ref?}, ...]
                                    clone an auxiliary repo (any host) into a dir
@@ -80,11 +81,10 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
                   confirm=None, followups=None, machine: Optional[str] = None) -> str:
     if not value:
         return ""
-    src = root / ".runme" / "runme_config"
-    dst = root / ".runme_config"
+    dst = root / ".runme" / "config.json"
     # The runme ``hpc`` is the machine name; default it to the machine this
     # install/config already resolved, so it need not be retyped when correct.
-    hpc = cfg.get("hpc") or ask("hpc name for .runme_config", default=machine)
+    hpc = cfg.get("hpc") or ask("hpc name for .runme/config.json", default=machine)
     # The account is too case-specific to default, but list the accounts the
     # user may submit under (best-effort, Slurm-only) as a hint before asking.
     account = cfg.get("account")
@@ -92,20 +92,31 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
         accounts = _slurm_accounts()
         if accounts:
             print(f"  available hpc accounts: {', '.join(accounts)}")
-        account = ask("hpc account for .runme_config")
-    runner.emit("# runme_config: create .runme_config and set hpc/account")
-    runner.emit("runme --config  # or: cp .runme/runme_config .runme_config")
+        account = ask("hpc account for .runme/config.json")
+    # `runme config init` is the canonical way to seed `.runme/config.json`
+    # (it copies `.runme/config.default.json` and stamps in defaults); we then
+    # patch hpc/account in place. We don't carry our own template anymore.
+    init_cmd = ["runme", "config", "init"]
+    runner.emit("# runme_config: seed .runme/config.json and set hpc/account")
+    runner.emit(" ".join(init_cmd))
     if runner.dry_run:
-        print(f"  runme_config: (dry) would create {dst} (hpc={hpc}, account={account})")
+        print(f"  runme_config: (dry) would run `{' '.join(init_cmd)}` to "
+              f"create {dst} (hpc={hpc}, account={account})")
         return "dry"
     if dst.exists():
         print(f"  runme_config: {dst} exists; leaving as-is")
-    elif src.is_file():
-        dst.write_bytes(src.read_bytes())
-        print(f"  runme_config: created {dst} from template")
     else:
-        print(f"  runme_config: no {src} template found; skipping")
-        return "skipped"
+        print(f"  runme_config: running `{' '.join(init_cmd)}` in {root}")
+        try:
+            subprocess.run(init_cmd, cwd=root, check=True)
+        except (subprocess.CalledProcessError, OSError) as e:
+            print(f"  ! runme config init failed: {e}")
+            return "failed"
+        if not dst.exists():
+            print(f"  runme_config: `{' '.join(init_cmd)}` did not produce {dst}; "
+                  f"skipping patch")
+            return "skipped"
+        print(f"  runme_config: created {dst}")
     if dst.exists() and (hpc or account):
         text = dst.read_text()
         if hpc:
