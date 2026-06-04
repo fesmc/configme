@@ -11,3 +11,8 @@ config_style = "makefile-template"
 # dep name at the package root, so this links yelmo/fesm-utils -> fesm-utils.
 [[package.links]]
 dep = "fesm-utils"
+
+# yelmo source `use`s FastHydrology modules, so yelmo links to the sibling
+# FastHydrology checkout (yelmo/FastHydrology -> ../FastHydrology under yelmox).
+[[package.links]]
+dep = "FastHydrology"

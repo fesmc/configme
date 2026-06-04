@@ -50,7 +50,7 @@ def test_empty_root_reports_all_repos_missing():
 def test_present_repo_is_ok(tmp_path):
     plan = install.build_plan("yelmox")
     for comp in ("yelmox", "yelmo", "fesm-utils", "coordinates",
-                 "FastIsostasy", "rembo1"):
+                 "FastIsostasy", "FastHydrology", "rembo1"):
         checkout(tmp_path / comp if comp != "yelmox" else tmp_path)
     checks = status.inspect(plan, tmp_path)
     assert state_of(checks, "repo", "yelmo") == "ok"

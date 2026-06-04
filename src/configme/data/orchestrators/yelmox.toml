@@ -17,6 +17,7 @@ default_packages = [
     "coordinates",
     "yelmo",
     "FastIsostasy",
+    "FastHydrology",
     "rembo1",
 ]
 

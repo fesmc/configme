@@ -1,0 +1,11 @@
+# FastHydrology: subglacial hydrology model.
+
+[package]
+name = "FastHydrology"
+org = "fesmc"
+repo = "FastHydrology"
+dir = "FastHydrology"
+config_style = "makefile-template"
+
+[[package.links]]
+dep = "fesm-utils"
