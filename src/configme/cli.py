@@ -3,7 +3,7 @@
 Command surface (see docs/DESIGN.md sec. 4)::
 
     configme install <target> [options]   clone/use-existing + configure + link + build
-    configme update [options]              self-update: pip install -U configme
+    configme update [<ref>] [options]      self-update: pip install -U configme (optional branch/tag/SHA)
     configme upgrade [<target>] [options] git pull + reconfigure (+ rebuild if changed)
     configme config [<target>] [options]  config-only: (re)generate Makefile(s)
     configme status [<target>] [options]  read-only: what is present / still pending
@@ -580,10 +580,14 @@ def cmd_install(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    """`configme update` — self-update configme by reinstalling the latest from
-    its git repo with ``pip install -U``. Lets pip decide whether anything needs
-    to change; we don't pre-check the installed version."""
+    """`configme update [ref]` — self-update configme by reinstalling from its
+    git repo with ``pip install -U``. With no ``ref``, pip pulls the default
+    branch; pass a branch, tag, or commit SHA (e.g. ``configme update dev``) to
+    install that ref instead — useful for staging changes on a ``dev`` branch
+    before they ship to ``main``."""
     url = "git+https://github.com/fesmc/configme"
+    if args.ref:
+        url = f"{url}@{args.ref}"
     cmd = [sys.executable, "-m", "pip", "install", "-U", url]
     if args.dry_run:
         print("DRY RUN — no changes will be made.")
@@ -734,6 +738,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_update = sub.add_parser(
         "update", help="self-update configme (pip install -U from its git repo)")
+    p_update.add_argument(
+        "ref", nargs="?", default=None,
+        help="git branch, tag, or commit SHA to install (e.g. 'dev'). "
+        "Default: the repo's default branch.")
     p_update.add_argument("--dry-run", action="store_true",
                           help="print the pip command without running it")
     p_update.set_defaults(func=cmd_update)
