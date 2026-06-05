@@ -56,9 +56,15 @@ The Makefile of each package is assembled from three fragments:
 ```
 
 inserted into the package's existing `config/Makefile` template at the
-`<COMPILER_CONFIGURATION>` placeholder, in the order **compiler → machine →
-common** (later fragments may override earlier variables; `common.mk`
-references variables the other two set).
+`<COMPILER_CONFIGURATION>` placeholder, in the order **compiler → machine**
+(later fragments may override earlier variables). The package's `common.mk`
+is **not** inlined: the template carries its own explicit
+`include config/common.mk` line immediately after the placeholder, so the
+dependency wiring is visible to anyone reading the template and the
+configme-generated and hand-edited paths produce the same Makefile. configme
+only ensures `common.mk` is present in the package's `config/` (copying a
+shipped overlay when needed). `common.mk` references variables the compiler
+and machine fragments set.
 
 This is exactly the two-axis layout yelmox already uses; configme centralises
 the compiler/machine axes and leaves `common.mk` with each repo.
