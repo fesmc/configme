@@ -379,14 +379,55 @@ def _hostname_map() -> Dict[str, str]:
     return _load_toml(path).get("hostnames", {})
 
 
+_FQDN_TIMEOUT_S = 1.0
+
+
+def _fqdn_with_timeout(timeout: float) -> Optional[str]:
+    """Best-effort fully-qualified hostname, bounded by ``timeout`` seconds.
+
+    Uses ``hostname -f`` via subprocess rather than ``socket.getfqdn()``: the
+    latter calls ``getaddrinfo`` on the local IP, which on macOS / corporate
+    networks with no PTR record blocks for ~30 s in a syscall that neither a
+    daemon thread nor SIGALRM can interrupt. ``hostname -f`` reads the host's
+    own configured name and is genuinely killable on timeout. Returns None if
+    the binary is missing, errors out, or does not return in time."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["hostname", "-f"], capture_output=True,
+                             text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if out.returncode != 0:
+        return None
+    name = out.stdout.strip()
+    return name or None
+
+
 def hostname_machine() -> Optional[str]:
-    """Best-effort machine from the current hostname via the shipped glob map."""
-    names = {socket.gethostname(), socket.getfqdn()}
+    """Best-effort machine from the current hostname via the shipped glob map.
+
+    Matches the bare ``gethostname()`` against every pattern first (fast,
+    purely local) and only falls back to a bounded ``hostname -f`` lookup
+    when no pattern matched and the map carries at least one domain pattern
+    (``*.foo``) that would actually need a FQDN. This keeps the common
+    personal-laptop case off the (often slow) reverse-DNS path."""
     mapping = _hostname_map()
-    for host in names:
-        for pattern, machine in mapping.items():
-            if fnmatch.fnmatch(host, pattern):
-                return machine
+    if not mapping:
+        return None
+    host = socket.gethostname()
+    for pattern, machine in mapping.items():
+        if fnmatch.fnmatch(host, pattern):
+            return machine
+    # FQDN is only worth trying if some pattern is domain-shaped.
+    if not any(p.startswith("*.") for p in mapping):
+        return None
+    fqdn = _fqdn_with_timeout(_FQDN_TIMEOUT_S)
+    if not fqdn or fqdn == host:
+        return None
+    for pattern, machine in mapping.items():
+        if fnmatch.fnmatch(fqdn, pattern):
+            return machine
     return None
 
 
