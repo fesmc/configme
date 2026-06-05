@@ -572,6 +572,7 @@ def cmd_install(args: argparse.Namespace) -> int:
         build_deps=args.build_deps,
         dry_run=args.dry_run,
         only=args.only,
+        link_args=args.link or [],
         select_fn=_select,
         ask_fn=_ask,
         confirm_fn=_confirm,
@@ -624,6 +625,7 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
         build_deps=args.build_deps,
         dry_run=args.dry_run,
         only=args.only,
+        link_args=args.link or [],
         select_fn=_select,
         confirm_fn=_confirm,
     )
@@ -721,6 +723,12 @@ def _build_parser() -> argparse.ArgumentParser:
                            "an orchestrator to its subpackages or pull deps")
     p_install.add_argument("--overwrite", action="store_true")
     p_install.add_argument("--build-deps", action="store_true")
+    p_install.add_argument(
+        "--link", action="append", metavar="PKG=PATH", default=None,
+        help="symlink an existing on-disk checkout of PKG instead of cloning "
+        "(repeatable: --link fesm-utils=/abs/path --link coordinates=/abs/other). "
+        "Overrides matching entries in ~/.configme/links.toml and "
+        "<root>/.configme/links.toml.")
     p_install.add_argument("--dry-run", action="store_true")
     p_install.set_defaults(func=cmd_install)
 
@@ -745,6 +753,11 @@ def _build_parser() -> argparse.ArgumentParser:
                            "an orchestrator to its subpackages or pull deps")
     p_upgrade.add_argument("--build-deps", action="store_true",
                            help="rebuild updated packages without prompting")
+    p_upgrade.add_argument(
+        "--link", action="append", metavar="PKG=PATH", default=None,
+        help="(re)point an existing on-disk checkout of PKG at a different "
+        "location (repeatable). Linked packages are skipped by the upgrade's "
+        "pull/rebuild step — the user manages their state externally.")
     p_upgrade.add_argument("--dry-run", action="store_true")
     p_upgrade.set_defaults(func=cmd_upgrade)
 

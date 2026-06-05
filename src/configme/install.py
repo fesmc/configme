@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from configme import context, data, extras as extras_mod, generate, netcdf
+from configme import context, data, extras as extras_mod, generate, links as links_mod, netcdf
 
 
 class InstallError(Exception):
@@ -415,6 +415,41 @@ class Runner:
         link_path.symlink_to(rel)
         return "linked"
 
+    def link_external(self, node: Node, dest: Path, target: Path) -> str:
+        """Symlink ``dest`` to an external, user-managed checkout at ``target``.
+
+        Used in place of ``clone`` when ``--link`` (or ``links.toml``) routes
+        ``node`` at an existing on-disk location. The symlink is absolute (the
+        user gave an absolute path; making it relative would obscure that).
+
+        Returns: linked | exists | dry. A pre-existing different ``dest`` is a
+        hard error unless ``overwrite=True``, in which case it is moved to
+        ``outdated-repos/`` exactly like the clone path."""
+        target = Path(target).expanduser().resolve()
+        self.emit(f"# {node.name}: link to existing checkout at {target}")
+        self.emit(f"ln -s {target} {dest}")
+        if self.dry_run:
+            return "dry"
+        if dest.is_symlink():
+            try:
+                if Path(os.readlink(dest)) == target:
+                    return "exists"
+            except OSError:
+                pass
+        if dest.exists() or dest.is_symlink():
+            if self.overwrite:
+                outdated = dest.parent / "outdated-repos"
+                outdated.mkdir(exist_ok=True)
+                shutil.move(str(dest), str(outdated / dest.name))
+            else:
+                raise InstallError(
+                    f"{node.name}: {dest} already exists; refusing to replace "
+                    f"with link to {target}. Move it aside or re-run with "
+                    f"--overwrite.")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.symlink_to(target)
+        return "linked"
+
 
 # --------------------------------------------------------------- main entry
 
@@ -513,10 +548,48 @@ def dest_of(node: Node, plan: Plan, root: Path) -> Path:
     return root / node.dir
 
 
+def _stamp_note(path: Path, machine: str, compiler: str) -> str:
+    """Read the build stamp at ``path`` and return a short ``  (! note)`` suffix
+    when the stamp disagrees with the current (machine, compiler), else "".
+
+    Purely informational — a linked external is the user's responsibility, so
+    a mismatch is a warning, not a refusal."""
+    stamp = links_mod.read_build_stamp(path)
+    if stamp is None:
+        return ""
+    note = links_mod.stamp_mismatch(stamp, machine=machine, compiler=compiler)
+    return f"  (! {note})" if note else ""
+
+
+def _resolve_links(plan: "Plan", root: Path, link_args: List[str],
+                   confirm_fn) -> Dict[str, Path]:
+    """Resolve the ``--link``/``links.toml`` map for an install/upgrade run.
+
+    Walks the three tiers (CLI > project > global), validates each entry
+    points at an existing dir of a known package, then prompts per file-tier
+    entry (CLI entries are silent — explicit). Returns the confirmed map.
+
+    Failures are surfaced as ``InstallError`` so the caller bails before the
+    clone phase: a half-resolved link map would leave dangling work behind."""
+    cli_links = links_mod.parse_link_args(link_args)
+    global_links, project_links = links_mod.load_file_links(root)
+    merged = links_mod.merge_links(global_links, project_links, cli_links)
+    if not merged:
+        return {}
+    known = [n.name for n in plan.nodes]
+    try:
+        links_mod.validate_links(merged, known)
+    except links_mod.LinkError as e:
+        raise InstallError(str(e)) from e
+    resolved = links_mod.confirm_file_links(merged, confirm_fn)
+    return resolved
+
+
 def run_install(target: str, *, download: str, install_dir: Optional[str],
                 machine: Optional[str], compiler: Optional[str],
                 overwrite: bool, build_deps: bool, dry_run: bool,
                 only: bool = False,
+                link_args: Optional[List[str]] = None,
                 select_fn=None, ask_fn=None, confirm_fn=None) -> int:
     cwd = Path.cwd()
     plan = build_plan(target, only=only)           # fail-fast: unknown names
@@ -550,9 +623,26 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     print(f"  packages: {', '.join(n.name for n in plan.nodes)}"
           f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
 
+    # Resolve --link / links.toml *before* the clone phase: a confirmed entry
+    # short-circuits the clone for that package (symlink instead). Fails fast
+    # on a bad path or unknown package so we never half-clone the rest.
+    link_map = _resolve_links(plan, root, link_args or [], confirm_fn)
+    if link_map:
+        print("  links:")
+        for pkg, path in link_map.items():
+            note = _stamp_note(path, machine, compiler)
+            print(f"    {pkg} -> {path}{note}")
+
     results = {"cloned": [], "configured": [], "built": [], "linked": [],
                "pending": [], "deferred": [], "skipped": [],
                "unavailable": [], "failed": []}
+
+    # Linking the primary makes no sense — that's what --dir is for. Reject
+    # explicitly rather than silently doing the wrong thing.
+    if plan.primary.name in link_map:
+        raise InstallError(
+            f"--link {plan.primary.name}=...: cannot link the install's primary "
+            f"package. Use --dir {link_map[plan.primary.name]} instead.")
 
     # --- clone phase
     runner.emit("\n# --- clone ---")
@@ -596,6 +686,17 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             runner.emit(f"# {node.name}: component of {node.parent} (not cloned)")
             continue
         dest = dest_of(node, plan, root)
+        # Linked package: symlink to an existing on-disk checkout instead of
+        # cloning. Skip ref pin / submodules — the linked target is the user's.
+        if node.name in link_map:
+            try:
+                st = runner.link_external(node, dest, link_map[node.name])
+                print(f"  link {node.name}: {st} -> {link_map[node.name]}")
+                results["linked"].append(node.name)
+            except InstallError as e:
+                print(f"  ! {node.name}: {e}")
+                results["failed"].append(node.name)
+            continue
         try:
             st = runner.clone(node, dest)
             ref_note = f" (ref {node.ref})" if node.ref else ""
@@ -681,7 +782,16 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         info = None  # configure step will surface this per-package if needed
     common_kw = dict(machine=machine, compiler=compiler, machine_path=machine_path,
                      compiler_path=compiler_path, dry_run=dry_run, results=results)
+    linked_set = set(link_map)
     for node in plan.nodes:
+        # Linked external: configme does not write Makefiles or trigger builds
+        # inside a user-managed checkout. Same for subpackages of a linked
+        # parent — they share that parent's (symlinked) checkout.
+        if node.name in linked_set or (node.parent and node.parent in linked_set):
+            runner.emit(f"# {node.name}: linked external (no configure)")
+            print(f"  - {node.name}: linked external; configure left to the "
+                  f"linked checkout")
+            continue
         dest = dest_of(node, plan, root)
         if node.config_style == "none":
             # Clone-only component (e.g. vilma, bgc): configme places it but does
@@ -716,7 +826,8 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         # compiled here, after its Makefile exists. Gated like the build.py step.
         if node.build is not None:
             _build_make_package(runner, node, dest, build_deps,
-                                confirm_fn, results, followups)
+                                confirm_fn, results, followups,
+                                machine=machine, compiler=compiler)
 
     # --- extras (orchestrator post-config steps)
     if plan.orchestrator is not None and plan.orchestrator.extras:
@@ -771,6 +882,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
 def run_upgrade(target: str, *, install_dir: Optional[str],
                 machine: Optional[str], compiler: Optional[str],
                 build_deps: bool, dry_run: bool, only: bool = False,
+                link_args: Optional[List[str]] = None,
                 select_fn=None, confirm_fn=None) -> int:
     """`configme upgrade`: ``git pull`` existing checkouts in place and
     reconfigure them with the same machine/compiler as the original install
@@ -819,6 +931,26 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     print(f"  packages: {', '.join(n.name for n in plan.nodes)}"
           f"{' (literal, no auto-resolve)' if plan.explicit else ''}")
 
+    # Resolve --link / links.toml (same shape as install). Also treat any
+    # already-on-disk symlink at a node's dest as "managed externally" so a
+    # prior install with --link survives a later upgrade run without --link.
+    link_map = _resolve_links(plan, root, link_args or [], confirm_fn)
+    if plan.primary.name in link_map:
+        raise InstallError(
+            f"--link {plan.primary.name}=...: cannot link the upgrade's "
+            f"primary package.")
+    linked_names = set(link_map)
+    for node in plan.nodes:
+        if node.name in linked_names:
+            continue
+        dest = dest_of(node, plan, root)
+        if dest.is_symlink():
+            linked_names.add(node.name)
+    if link_map:
+        print("  links:")
+        for pkg, path in link_map.items():
+            print(f"    {pkg} -> {path}{_stamp_note(path, machine, compiler)}")
+
     results = {"updated": [], "configured": [], "built": [], "missing": [],
                "deferred": [], "skipped": [], "failed": []}
 
@@ -832,6 +964,9 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     runner.emit("\n# --- ref reconcile ---")
     for node in plan.nodes:
         if not node.ref or not node.clone:
+            continue
+        if node.name in linked_names:
+            runner.emit(f"# {node.name}: linked external (no ref switch)")
             continue
         dest = dest_of(node, plan, root)
         if not dest.is_dir():
@@ -860,6 +995,22 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
         if not node.clone:
             runner.emit(f"# {node.name}: component of {node.parent} (no separate pull)")
             continue
+        # Linked external: skip pull (user manages the target). A new --link
+        # at upgrade time is honored as a (re)point — emit the symlink.
+        if node.name in linked_names:
+            updated[node.name] = False
+            dest = dest_of(node, plan, root)
+            if node.name in link_map:
+                try:
+                    st = runner.link_external(node, dest, link_map[node.name])
+                    print(f"  link {node.name}: {st} -> {link_map[node.name]}")
+                except InstallError as e:
+                    print(f"  ! {node.name}: {e}")
+                    results["failed"].append(node.name)
+            else:
+                runner.emit(f"# {node.name}: linked external (no pull)")
+                print(f"  - {node.name}: linked external; skipping pull")
+            continue
         dest = dest_of(node, plan, root)
         try:
             status, did_update = runner.pull(node, dest)
@@ -886,6 +1037,12 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     common_kw = dict(machine=machine, compiler=compiler, machine_path=machine_path,
                      compiler_path=compiler_path, dry_run=dry_run, results=results)
     for node in plan.nodes:
+        # Linked external (or a subpackage under one): leave Makefile + build
+        # to the linked checkout's owner.
+        if node.name in linked_names or (node.parent and node.parent in linked_names):
+            runner.emit(f"# {node.name}: linked external (no reconfigure)")
+            print(f"  - {node.name}: linked external; skipping reconfigure")
+            continue
         dest = dest_of(node, plan, root)
         # A subpackage shares its parent's git checkout, so its "was it updated?"
         # is the parent's pull result.
@@ -920,7 +1077,8 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
             if was_updated:
                 _build_make_package(runner, node, dest, build_deps,
                                     confirm_fn, results,
-                                    prefer_skip_if_built=False)
+                                    prefer_skip_if_built=False,
+                                    machine=machine, compiler=compiler)
             elif dest.is_dir():
                 print(f"  - {node.name}: unchanged; skipping rebuild")
 
@@ -1041,13 +1199,23 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
                         "-m", machine, "-c", compiler],
                        cwd=dest, check=True, env=env)
         results["built"].append(node.name)
+        # Stamp the build so a later --link of this dir into another install
+        # warns when (machine, compiler) disagrees.
+        try:
+            links_mod.write_build_stamp(dest, tool="build.py", machine=machine,
+                                        compiler=compiler,
+                                        variants=["serial", "omp"])
+        except OSError:
+            pass
     except (subprocess.CalledProcessError, OSError) as e:
         print(f"  ! {node.name} build failed: {e}")
         results["failed"].append(node.name)
 
 
 def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
-                        followups=None, *, prefer_skip_if_built=True):
+                        followups=None, *, prefer_skip_if_built=True,
+                        machine: Optional[str] = None,
+                        compiler: Optional[str] = None):
     """Compile a package whose build configme owns (`[package.build]`), once per
     variant: ``make openmp=<0|1> <make_target>``. Runs in the inherited shell
     environment (the Makefile already carries the configme-resolved compiler /
@@ -1099,12 +1267,21 @@ def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
             _defer("build deferred")
         return
 
+    built_variants: List[str] = []
     for variant, cmd in cmds:
         print(f"  building {node.name} ({variant}): {cmd}")
         try:
             subprocess.run(["make", f"openmp={spec.openmp_flag(variant)}",
                             spec.make_target], cwd=dest, check=True)
             results["built"].append(f"{node.name} ({variant})")
+            built_variants.append(variant)
         except (subprocess.CalledProcessError, OSError) as e:
             print(f"  ! {node.name} build failed: {e}")
             results["failed"].append(f"{node.name} ({variant})")
+    if built_variants and machine and compiler:
+        try:
+            links_mod.write_build_stamp(dest, tool="make", machine=machine,
+                                        compiler=compiler,
+                                        variants=built_variants)
+        except OSError:
+            pass

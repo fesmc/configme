@@ -56,6 +56,7 @@ configme install yelmox --dir ~/models/yelmox        # put the checkout here ins
 configme install yelmox --build-deps                 # rebuild dependency packages without prompting
 configme install yelmo                               # just yelmo + the sub-packages it needs
 configme install yelmo --only                        # only yelmo, nothing pulled in
+configme install yelmox --link fesm-utils=/abs/path  # symlink an existing checkout instead of cloning
 configme install yelmox --dry-run                    # preview what would be cloned/configured
 ```
 
@@ -109,6 +110,51 @@ cd yelmo && configme -m macbook -c gfortran      # bare = `configme config` on t
 
 `configme config` only (re)generates Makefiles — it never clones, links, or
 builds. Add `--dry-run` to preview which Makefiles would change.
+
+### Reuse an existing checkout (`--link`)
+
+If a package is already cloned somewhere else on disk (e.g. a shared
+`fesm-utils` build on an HPC filesystem, or a development checkout you maintain
+by hand), point configme at it instead of cloning a duplicate:
+
+```bash
+configme install yelmox --link fesm-utils=/work/shared/fesm-utils
+configme install yelmox --link fesm-utils=/abs/a --link coordinates=/abs/b
+```
+
+configme symlinks the package's slot inside the install root (`yelmox/fesm-utils
+-> /work/shared/fesm-utils`) and skips its clone, configure, and build steps —
+the linked checkout is treated as user-managed. Inter-package links (e.g.
+`yelmox/yelmo/fesm-utils -> ../fesm-utils`) still work because they chain through
+the symlink. The primary package itself cannot be linked — use `--dir` for that.
+
+A non-existent link target is a hard error: configme will not fall back to
+cloning, since silent fallback would defeat the point of the flag.
+
+Frequently-reused mappings can live in TOML instead:
+
+```toml
+# ~/.configme/links.toml             — applies to every install
+# <root>/.configme/links.toml        — overrides global per-package
+[links]
+"fesm-utils" = "/work/shared/fesm-utils"
+"coordinates" = "/work/shared/coordinates"
+```
+
+Precedence: `--link` (CLI) overrides `<root>/.configme/links.toml` (project)
+overrides `~/.configme/links.toml` (global). CLI links are applied silently;
+file-supplied links are confirmed one at a time at install time (the file may
+carry stale entries — better to ask than silently link a wrong path).
+
+`configme upgrade` honors links too: a linked package's pull and rebuild are
+skipped because the external checkout is the user's to manage. Pass `--link`
+again at upgrade time to (re)point a link at a different target.
+
+After each successful build, configme writes a small `.configme-build.toml`
+into the package's checkout recording the machine and compiler it was built
+for. When a later install links that same checkout into a project with a
+different `(machine, compiler)`, the link line gets a `(! …)` warning so a
+toolchain mismatch is visible before it confuses the consumer's build.
 
 ### Upgrade an installed stack
 

@@ -175,6 +175,14 @@ Options (mirroring today's `install.py`):
 - `--overwrite` — re-clone, moving existing copies aside.
 - `--build-deps` — also run `build.py`-style package builds (e.g. fesm-utils);
   off by default (§9).
+- `--link PKG=PATH` — symlink an existing on-disk checkout of `PKG` instead of
+  cloning a duplicate (repeatable). Same map can live in
+  `~/.configme/links.toml` (global) or `<root>/.configme/links.toml` (project,
+  overrides global per package). CLI overrides both file tiers and applies
+  silently; file-tier entries are confirmed per link at install time. Linked
+  packages skip clone, configure, and build — the linked checkout is treated as
+  user-managed. Hard error on a missing target. Cannot apply to the primary
+  (use `--dir`).
 - `--only` — install only the named target: no orchestrator expansion and no
   dependency resolution (the single-target equivalent of a `+`-list).
 - `--dry-run` — print the full plan (and the `.install.sh` it would write)
