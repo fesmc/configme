@@ -160,6 +160,20 @@ def _data_link(value, runner, root: Path, cfg: dict, ask,
         # resolved, made absolute from the filesystem root) so they stay valid
         # regardless of where the link is later read from.
         target = Path(os.path.expandvars(os.path.expanduser(path))).resolve()
+        # Refuse a self-loop (target's inode is link_path's own parent). Uses
+        # samefile() so a case-insensitive APFS/HFS+ match (`/x/Foo` vs
+        # `/x/foo`) is caught even though the path strings differ.
+        try:
+            self_loop = link_path.parent.exists() and target.samefile(
+                link_path.parent)
+        except OSError:
+            self_loop = False
+        if self_loop:
+            print(f"  ! data_link {label}: refusing self-referential link "
+                  f"{link_path} -> {target} (target is its parent directory); "
+                  f"skipping")
+            done.append(f"{label}=skipped (self-loop)")
+            continue
         runner.emit(f"ln -s {target} {label}")
         if runner.dry_run:
             print(f"  data_link {label}: (dry) {link_path} -> {target}")

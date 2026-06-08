@@ -65,6 +65,18 @@ def test_data_link_uses_config_path_when_missing(tmp_path):
     assert (tmp_path / "ice_data").resolve() == target.resolve()
 
 
+def test_data_link_refuses_self_referential_target(tmp_path):
+    # cfg points the data link at root itself; would create root/ice_data ->
+    # root (a silent no-op loop). Same APFS-case-insensitive trap as
+    # link_external — refuse, don't write the link.
+    runner = install.Runner(dry_run=False)
+    out = extras._data_link(["ice_data"], runner, tmp_path,
+                            cfg={"ice_data": str(tmp_path)},
+                            ask=lambda *a, **k: None)
+    assert "ice_data=skipped (self-loop)" in out
+    assert not (tmp_path / "ice_data").exists()
+
+
 # ----------------------------------------------------- install pip-tool shortcut
 
 def test_install_runme_dry_run_prints_pip_command(capsys, monkeypatch):

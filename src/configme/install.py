@@ -424,8 +424,25 @@ class Runner:
 
         Returns: linked | exists | dry. A pre-existing different ``dest`` is a
         hard error unless ``overwrite=True``, in which case it is moved to
-        ``outdated-repos/`` exactly like the clone path."""
+        ``outdated-repos/`` exactly like the clone path. A self-referential
+        ``target`` (one whose inode is ``dest.parent`` itself, e.g. when an
+        APFS case-insensitive path makes ``/x/Foo`` and ``/x/foo`` indistinct)
+        is rejected — otherwise we would silently create a no-op loop
+        ``dest -> dest.parent``."""
         target = Path(target).expanduser().resolve()
+        # samefile() compares inodes, so it catches case-insensitive collisions
+        # (`/path/Foo` vs `/path/foo`) that plain string compare on resolve()
+        # misses on APFS / HFS+.
+        try:
+            self_loop = dest.parent.exists() and target.samefile(dest.parent)
+        except OSError:
+            self_loop = False
+        if self_loop:
+            raise InstallError(
+                f"{node.name}: refusing self-referential link "
+                f"{dest} -> {target} (target is the link's own parent "
+                f"directory). This usually means a --link/links.toml entry "
+                f"points at the install root itself.")
         self.emit(f"# {node.name}: link to existing checkout at {target}")
         self.emit(f"ln -s {target} {dest}")
         if self.dry_run:

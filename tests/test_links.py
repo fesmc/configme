@@ -249,6 +249,22 @@ def test_link_external_dry_run(tmp_path):
     assert any("ln -s" in line and "fesm-utils" in line for line in runner.log)
 
 
+def test_link_external_refuses_self_referential_target(tmp_path):
+    # Target is the link's own parent directory: creating dest would produce
+    # `<root>/fesm-utils -> <root>`, a no-op loop. Triggered in the wild by an
+    # APFS case-insensitive collision between `--link FastHydrology=/x/Foo`
+    # and a root of `/x/foo`.
+    root = tmp_path / "root"
+    root.mkdir()
+    dest = root / "fesm-utils"
+    runner = install.Runner(dry_run=False)
+    node = install.Node("fesm-utils", "fesmc", "fesm-utils", "fesm-utils",
+                        "build.py", "", [], False)
+    with pytest.raises(install.InstallError, match="self-referential"):
+        runner.link_external(node, dest, root)
+    assert not dest.exists()
+
+
 # ---------------------------------------------------------- _resolve_links integration
 
 def test_resolve_links_cli_not_prompted(tmp_path, monkeypatch):
