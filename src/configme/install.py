@@ -542,10 +542,14 @@ def root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, b
     if install_dir:
         root = Path(install_dir).expanduser().resolve()
         return root, _primary_present(root, plan)
-    # In or pointing at an existing primary checkout? (dir named after the
-    # primary, or one carrying configme metadata) — but only "present" if it
-    # actually holds a checkout.
-    if cwd.name == plan.primary.dir or (cwd / ".configme").is_dir():
+    # In or pointing at an existing primary checkout? Two signals:
+    #  * the directory is named after the primary (pre-manifest case), or
+    #  * cwd's manifest names this same primary.
+    # A bare ``.configme/`` on its own is NOT enough: cwd may be a *different*
+    # configme-managed project (e.g. an orchestrator like yelmox) and we are
+    # installing a component into it — that component belongs under
+    # ``cwd / plan.primary.dir``, not at cwd itself.
+    if cwd.name == plan.primary.dir or context._manifest_primary(cwd) == plan.primary.name:
         return cwd, _primary_present(cwd, plan)
     root = (cwd / plan.primary.dir).resolve()
     return root, _primary_present(root, plan)

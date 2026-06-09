@@ -77,6 +77,32 @@ def test_data_link_refuses_self_referential_target(tmp_path):
     assert not (tmp_path / "ice_data").exists()
 
 
+# ---------------------------------------------------------------------- root_for
+
+def test_root_for_uses_subdir_when_cwd_manifest_names_other_project(tmp_path):
+    # Running `configme install fesm-utils` from inside an existing yelmox
+    # checkout must install fesm-utils as `yelmox/fesm-utils/`, not treat the
+    # yelmox root itself as the fesm-utils checkout. A bare `.configme/` on
+    # cwd is not enough to claim cwd is the primary — the manifest's `package`
+    # must match.
+    (tmp_path / ".configme").mkdir()
+    (tmp_path / ".configme" / "manifest.toml").write_text('package = "yelmox"\n')
+    plan = install.build_plan("fesm-utils")
+    root, present = install.root_for(plan, None, tmp_path)
+    assert root == (tmp_path / "fesm-utils").resolve()
+    assert present is False
+
+
+def test_root_for_uses_cwd_when_manifest_names_primary(tmp_path):
+    # Inverse of the above: cwd IS the fesm-utils checkout (manifest says so),
+    # so root_for must return cwd itself rather than `cwd/fesm-utils`.
+    (tmp_path / ".configme").mkdir()
+    (tmp_path / ".configme" / "manifest.toml").write_text('package = "fesm-utils"\n')
+    plan = install.build_plan("fesm-utils")
+    root, _ = install.root_for(plan, None, tmp_path)
+    assert root == tmp_path
+
+
 # ----------------------------------------------------- install pip-tool shortcut
 
 def test_install_runme_dry_run_prints_pip_command(capsys, monkeypatch):
