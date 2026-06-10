@@ -148,3 +148,180 @@ def test_install_runme_dispatches_to_pip_not_build_plan(monkeypatch):
     assert seen["check"] is True
     assert seen["cmd"] == [sys.executable, "-m", "pip", "install", "-U",
                            "git+https://github.com/fesmc/runme"]
+
+
+# ----------------------------------------------- _host_orchestrator_for
+
+
+def _write_manifest(root: Path, package: str) -> None:
+    (root / ".configme").mkdir(parents=True, exist_ok=True)
+    (root / ".configme" / "manifest.toml").write_text(f'package = "{package}"\n')
+
+
+def test_host_orchestrator_for_returns_orch_when_target_is_component(tmp_path):
+    _write_manifest(tmp_path, "yelmox")
+    host = install._host_orchestrator_for("FastHydrology", tmp_path)
+    assert host is not None and host.name == "yelmox"
+
+
+def test_host_orchestrator_for_returns_orch_for_optional_component(tmp_path):
+    # climber-x's bgc/vilma are optional_packages — still components of the
+    # orchestrator, so the prompt path should still trigger.
+    _write_manifest(tmp_path, "climber-x")
+    host = install._host_orchestrator_for("vilma", tmp_path)
+    assert host is not None and host.name == "climber-x"
+
+
+def test_host_orchestrator_for_none_when_no_manifest(tmp_path):
+    assert install._host_orchestrator_for("FastHydrology", tmp_path) is None
+
+
+def test_host_orchestrator_for_none_when_manifest_names_package(tmp_path):
+    _write_manifest(tmp_path, "fesm-utils")
+    assert install._host_orchestrator_for("FastHydrology", tmp_path) is None
+
+
+def test_host_orchestrator_for_none_when_target_is_orch_itself(tmp_path):
+    # Inside yelmox, `configme install yelmox` has nothing to graft — return
+    # None so the existing "primary already present" path handles it.
+    _write_manifest(tmp_path, "yelmox")
+    assert install._host_orchestrator_for("yelmox", tmp_path) is None
+
+
+def test_host_orchestrator_for_none_when_target_unrelated(tmp_path):
+    # FastHydrology is not a climber-x component, so being inside climber-x
+    # does not trigger the prompt.
+    _write_manifest(tmp_path, "climber-x")
+    assert install._host_orchestrator_for("FastHydrology", tmp_path) is None
+
+
+def test_host_orchestrator_for_none_on_corrupt_manifest(tmp_path):
+    # A manifest with no `package` key raises ProjectError in
+    # _manifest_primary; the helper swallows it so the prompt simply does not
+    # fire (the surrounding install proceeds with the default plan).
+    (tmp_path / ".configme").mkdir()
+    (tmp_path / ".configme" / "manifest.toml").write_text("deps = []\n")
+    assert install._host_orchestrator_for("FastHydrology", tmp_path) is None
+
+
+# ------------------------------------------ run_install: orchestrator prompt
+
+
+def _stop_at_root_for(monkeypatch):
+    """Halt run_install right after the (re)plan, before clone / link / build.
+    Used to inspect what target build_plan was called with after the prompt."""
+
+    class _Bail(Exception):
+        pass
+
+    def stop(*a, **kw):
+        raise _Bail
+
+    monkeypatch.setattr(install, "root_for", stop)
+    return _Bail
+
+
+def _spy_build_plan(monkeypatch, calls):
+    real = install.build_plan
+
+    def spy(target, *, only=False):
+        calls.append(target)
+        return real(target, only=only)
+
+    monkeypatch.setattr(install, "build_plan", spy)
+
+
+def test_run_install_prompts_inside_orchestrator_and_replans(tmp_path, monkeypatch):
+    # Inside yelmox, `configme install FastHydrology` offers to install
+    # FastHydrology as a yelmox component (sharing existing deps) instead of
+    # side-by-side. When the user accepts, the plan is rebuilt as
+    # "yelmox+FastHydrology" before the rest of the install runs.
+    _write_manifest(tmp_path, "yelmox")
+    monkeypatch.chdir(tmp_path)
+    Bail = _stop_at_root_for(monkeypatch)
+    calls: list = []
+    _spy_build_plan(monkeypatch, calls)
+    asked: list = []
+
+    def confirm(question, default):
+        asked.append(question)
+        return True
+
+    try:
+        install.run_install(
+            "FastHydrology", download="ssh", install_dir=None,
+            machine="macbook", compiler="gfortran",
+            overwrite=False, build_deps=False, dry_run=True, only=False,
+            link_args=None, select_fn=None, ask_fn=None, confirm_fn=confirm,
+        )
+    except Bail:
+        pass
+
+    assert calls == ["FastHydrology", "yelmox+FastHydrology"]
+    assert asked and "yelmox" in asked[0] and "FastHydrology" in asked[0]
+
+
+def test_run_install_keeps_standalone_when_user_declines(tmp_path, monkeypatch):
+    # Same setup as above but the user declines the prompt — the plan stays on
+    # FastHydrology-as-primary so the standalone install path runs.
+    _write_manifest(tmp_path, "yelmox")
+    monkeypatch.chdir(tmp_path)
+    Bail = _stop_at_root_for(monkeypatch)
+    calls: list = []
+    _spy_build_plan(monkeypatch, calls)
+
+    try:
+        install.run_install(
+            "FastHydrology", download="ssh", install_dir=None,
+            machine="macbook", compiler="gfortran",
+            overwrite=False, build_deps=False, dry_run=True, only=False,
+            link_args=None, select_fn=None, ask_fn=None,
+            confirm_fn=lambda q, d: False,
+        )
+    except Bail:
+        pass
+
+    assert calls == ["FastHydrology"]
+
+
+def test_run_install_skips_prompt_with_only_flag(tmp_path, monkeypatch):
+    # --only is the user being explicit about scope; the prompt must not fire.
+    _write_manifest(tmp_path, "yelmox")
+    monkeypatch.chdir(tmp_path)
+    Bail = _stop_at_root_for(monkeypatch)
+    asked: list = []
+
+    try:
+        install.run_install(
+            "FastHydrology", download="ssh", install_dir=None,
+            machine="macbook", compiler="gfortran",
+            overwrite=False, build_deps=False, dry_run=True, only=True,
+            link_args=None, select_fn=None, ask_fn=None,
+            confirm_fn=lambda q, d: asked.append(q) or True,
+        )
+    except Bail:
+        pass
+
+    assert asked == []
+
+
+def test_run_install_skips_prompt_with_install_dir(tmp_path, monkeypatch):
+    # --dir is the user being explicit about location; do not graft.
+    _write_manifest(tmp_path, "yelmox")
+    monkeypatch.chdir(tmp_path)
+    Bail = _stop_at_root_for(monkeypatch)
+    asked: list = []
+
+    try:
+        install.run_install(
+            "FastHydrology", download="ssh",
+            install_dir=str(tmp_path / "somewhere-else"),
+            machine="macbook", compiler="gfortran",
+            overwrite=False, build_deps=False, dry_run=True, only=False,
+            link_args=None, select_fn=None, ask_fn=None,
+            confirm_fn=lambda q, d: asked.append(q) or True,
+        )
+    except Bail:
+        pass
+
+    assert asked == []

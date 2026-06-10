@@ -555,6 +555,34 @@ def root_for(plan: Plan, install_dir: Optional[str], cwd: Path) -> Tuple[Path, b
     return root, _primary_present(root, plan)
 
 
+def _host_orchestrator_for(target_name: str,
+                           cwd: Path) -> "Optional[data.Orchestrator]":
+    """Return the orchestrator whose checkout sits at ``cwd``, when that
+    orchestrator claims ``target_name`` as one of its (default or optional)
+    component packages. Else ``None``.
+
+    Used by ``run_install`` to spot the "ran `configme install <pkg>` from
+    inside an orchestrator that already manages <pkg>" case, so the user can
+    be offered to install <pkg> *as a component of the orchestrator* (sharing
+    its already-cloned deps) instead of side-by-side with its own fresh deps.
+    Returns ``None`` when ``cwd`` has no manifest, names a non-orchestrator,
+    or the target is the orchestrator itself."""
+    try:
+        primary = context._manifest_primary(cwd)
+    except context.ProjectError:
+        return None
+    if primary is None:
+        return None
+    orch = data.orchestrators().get(primary)
+    if orch is None:
+        return None
+    if target_name == orch.name:
+        return None
+    if target_name in orch.default_packages or target_name in orch.optional_packages:
+        return orch
+    return None
+
+
 def dest_of(node: Node, plan: Plan, root: Path) -> Path:
     if node.name == plan.primary.name:
         return root
@@ -622,6 +650,26 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             f"{plan.primary.name} is a component of another package's checkout "
             f"and cannot be installed on its own; {hint}. (To (re)generate its "
             f"Makefile use `configme config {plan.primary.name}`.)")
+
+    # `configme install <pkg>` from inside an orchestrator that owns <pkg>:
+    # the default plan would install <pkg> side-by-side with the orchestrator,
+    # cloning its own fresh copies of deps (e.g. a second fesm-utils tree
+    # under FastHydrology/). Offer to install <pkg> as a component of the host
+    # orchestrator instead, so it shares the deps the orchestrator already
+    # provides. Skipped when the user has already been explicit about scope
+    # (`--only`, `--dir`, or a `+`-literal target).
+    if (not only and "+" not in target and install_dir is None
+            and not plan.primary.is_orchestrator and confirm_fn is not None):
+        host = _host_orchestrator_for(plan.primary.name, cwd)
+        if host is not None:
+            question = (
+                f"You are inside the {host.name} install, which manages "
+                f"{plan.primary.name} as a component. Install it as a "
+                f"{host.name} component (share existing deps)?")
+            if confirm_fn(question, True):
+                target = f"{host.name}+{plan.primary.name}"
+                plan = build_plan(target)
+
     root, primary_present = root_for(plan, install_dir, cwd)
 
     # Resolve selection early (fail-fast on missing machine/compiler) using the
