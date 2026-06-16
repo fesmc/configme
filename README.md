@@ -230,6 +230,22 @@ You don't even have to run `new` first: if you pass an unknown machine to
 `linux` on the spot. Once your fragment works well, please consider
 contributing it back to configme so others can reuse it.
 
+The `.mk` fragment above configures the libraries configme builds itself. One
+dependency — `fesm-utils` — builds its bundled `fftw`/`lis` with its own
+`build.py`, which reads a **separate** machine file in its own schema (compiler
+vars, `module load`s, and per-component overrides configme deliberately doesn't
+model). So `configme new machine <name>` (and the unknown-machine prompt above)
+writes *two* stubs per tier: the `<name>.mk` fragment **and** a `<name>.toml` in
+fesm-utils' build.py schema, seeded from a bundled template with the machine name
+filled in. Edit the `.toml`'s compilers/modules for your cluster (an HPC machine
+like chinook+ifx needs an `[compilers.ifx]` table and the right `[modules]`).
+
+When configme drives `build.py`, it copies your `<name>.toml` into the
+`fesm-utils` checkout's `machines/` so `build.py -m <name>` resolves it — you
+never edit the checkout directly. If a same-named file already exists there and
+differs, configme asks before overwriting (default no), so a checked-in machine
+file is never clobbered.
+
 ### Standalone tools
 
 A few standalone fesmc tools that aren't model packages can still be installed

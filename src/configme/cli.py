@@ -229,8 +229,8 @@ def _ensure_machine(name: str, project) -> bool:
     into the project (if any) and user tiers. Returns True if the machine is now
     available (created), False to re-prompt."""
     if not _confirm(f"machine '{name}' is not known — create "
-                    f".configme/machines/{name}.mk (and the ~/.configme copy) "
-                    f"from 'linux' to edit?", True):
+                    f".configme/machines/{name}.mk + {name}.toml (and the "
+                    f"~/.configme copies) from 'linux' to edit?", True):
         return False
     written = context.create_fragment("machine", name, src="linux", project=project)
     for p in written:

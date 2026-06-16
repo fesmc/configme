@@ -307,6 +307,31 @@ def resolve_fragment(kind: str, name: str,
     )
 
 
+def resolve_build_machine_file(name: str,
+                               project: Optional[Project]) -> Optional[Path]:
+    """Locate a user-authored *fesm-utils* machine TOML for the fftw/lis build,
+    project tier before user tier: ``<root>/.configme/machines/<name>.toml`` then
+    ``~/.configme/machines/<name>.toml``.
+
+    These are distinct from the ``.mk`` machine fragments configme owns: they are
+    written in fesm-utils' own ``build.py`` schema (compilers + module loads +
+    per-component lis/fftw overrides), which configme deliberately does NOT model
+    — it carries the file verbatim. The caller copies the resolved file into a
+    fesm-utils checkout's ``machines/`` so ``build.py -m <name>`` finds it.
+
+    Returns the resolved path, or ``None`` when the user has authored none (the
+    build then falls back to build.py's own bundled ``machines/``)."""
+    bases: List[Path] = []
+    if project is not None:
+        bases.append(project.configme_dir)
+    bases.append(user_dir())
+    for base in bases:
+        path = _tier_dir(base, "machine") / f"{name}.toml"
+        if path.is_file():
+            return path
+    return None
+
+
 def is_locally_defined_only(kind: str, name: str) -> bool:
     """True if a fragment name is NOT in the shipped registry — used to nudge the
     user to contribute it centrally."""
@@ -338,35 +363,59 @@ def _seeded_fragment_text(kind: str, name: str, src: str, body: str) -> str:
     return header + rest + ("\n" if not rest.endswith("\n") else "")
 
 
+# Bundled seed for a fesm-utils build.py machine file (its own TOML schema — see
+# resolve_build_machine_file). configme ships a copy so `new machine` scaffolds
+# it without a fesm-utils checkout present; the canonical version lives in the
+# fesm-utils repo at machines/TEMPLATE.toml.
+_BUILD_MACHINE_TEMPLATE = data.DATA_DIR / "fesm-utils-machine.template.toml"
+
+
+def _seeded_build_machine_text(name: str) -> str:
+    """A fesm-utils build.py machine stub for ``name``, from the bundled template
+    with the placeholder cluster name substituted. The user edits the compilers /
+    modules; configme carries the file verbatim (see resolve_build_machine_file)."""
+    return _BUILD_MACHINE_TEMPLATE.read_text().replace("my_cluster", name)
+
+
 def create_fragment(kind: str, name: str, *, src: str,
                     project: Optional[Project], force: bool = False) -> List[Path]:
     """Scaffold a new machine/compiler fragment ``<name>.mk`` seeded from ``src``.
 
     Writes the project tier (``<root>/.configme/<kind>s/``) when a project is
     given, and always the user tier (``~/.configme/<kind>s/``) as a durable
-    backup. Refuses to overwrite existing files unless ``force``. Returns the
-    paths written."""
+    backup. For a *machine* it also drops a ``<name>.toml`` stub alongside the
+    ``.mk`` (the fesm-utils build.py machine file in its own schema), so the new
+    machine works for both the configme-owned builds and fesm-utils' fftw/lis.
+    Refuses to overwrite existing files unless ``force``. Returns the paths
+    written."""
     if kind not in ("machine", "compiler"):
         raise ProjectError(f"unknown fragment kind '{kind}'")
     _src_path, _tier = resolve_fragment(kind, src, project)  # fail-fast on bad seed
     content = _seeded_fragment_text(kind, name, src, _src_path.read_text())
 
-    targets: List[Path] = []
+    tier_dirs: List[Path] = []
     if project is not None:
-        targets.append(_tier_dir(project.configme_dir, kind) / f"{name}.mk")
-    targets.append(_tier_dir(user_dir(), kind) / f"{name}.mk")
+        tier_dirs.append(_tier_dir(project.configme_dir, kind))
+    tier_dirs.append(_tier_dir(user_dir(), kind))
 
-    existing = [t for t in targets if t.is_file()]
+    # (path, content) to write per tier: the .mk fragment always, plus the
+    # fesm-utils build.py .toml for machines.
+    plan: List[Tuple[Path, str]] = [(d / f"{name}.mk", content) for d in tier_dirs]
+    if kind == "machine":
+        build_content = _seeded_build_machine_text(name)
+        plan += [(d / f"{name}.toml", build_content) for d in tier_dirs]
+
+    existing = [p for p, _ in plan if p.is_file()]
     if existing and not force:
         raise ProjectError(
             f"{kind} fragment '{name}' already exists: "
             f"{', '.join(str(p) for p in existing)} (use --force to overwrite)")
 
     written: List[Path] = []
-    for t in targets:
-        t.parent.mkdir(parents=True, exist_ok=True)
-        t.write_text(content)
-        written.append(t)
+    for path, body in plan:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body)
+        written.append(path)
     return written
 
 

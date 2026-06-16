@@ -875,7 +875,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             # in results, so the parent node's status reflects what actually
             # happened rather than the --build-deps flag.
             _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                           info, results, confirm_fn, followups)
+                           info, results, confirm_fn, followups, project=project)
             # A build.py package may also expose a makefile-template config
             # subdir that configme generates directly. (fesm-utils instead now
             # carries its utils component as a separate subpackage.)
@@ -1131,7 +1131,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
                                     is_orchestrator=False, **common_kw)
             if was_updated:
                 _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                               info, results, confirm_fn,
+                               info, results, confirm_fn, project=project,
                                prefer_skip_if_built=False)
             elif dest.is_dir():
                 print(f"  - {node.name}: unchanged; skipping rebuild")
@@ -1195,9 +1195,42 @@ def _artifacts_state(name: str, dest: Path) -> str:
     return "built" if present == len(paths) else "partial"
 
 
+def _stage_build_machine_file(dest, machine, project, dry_run, confirm_fn):
+    """Copy a configme-tier fesm-utils machine TOML (if the user authored one)
+    into the checkout's ``machines/<machine>.toml`` so build.py's ``-m`` resolves
+    it. configme carries the file verbatim — it does not model the modules /
+    per-component overrides it holds (those stay fesm-utils-specific).
+
+    No source authored, or no checkout on disk: no-op (build.py uses its bundled
+    machine, or errors as before). Target already present and byte-identical:
+    no-op. Target present but *different*: ask before overwriting (default no), so
+    a checkout's committed machine file is never silently clobbered. Dry runs only
+    print intent."""
+    src = context.resolve_build_machine_file(machine, project)
+    if src is None or not dest.is_dir():
+        return
+    target = dest / "machines" / f"{machine}.toml"
+    if dry_run:
+        print(f"  - would stage machines/{machine}.toml from {src}")
+        return
+    if target.is_file():
+        if target.read_bytes() == src.read_bytes():
+            return  # already in place and identical
+        prompt = (f"{target} exists and differs from your configme copy "
+                  f"({src}) — overwrite?")
+        overwrite = confirm_fn(prompt, False) if confirm_fn is not None else False
+        if not overwrite:
+            print(f"  - {machine}.toml: keeping the existing machines/ copy in "
+                  f"{dest.name}")
+            return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(src.read_bytes())
+    print(f"  + staged machines/{machine}.toml from {src}")
+
+
 def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
                    results, confirm_fn=None, followups=None, *,
-                   prefer_skip_if_built=True):
+                   project=None, prefer_skip_if_built=True):
     """fesm-utils-style package: print/run its build.py (see issue #7).
 
     The build runs autotools and is slow (~10-30 min), so it is not run
@@ -1208,6 +1241,10 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
     Records the actual outcome in ``results``: ``deferred`` when the build is
     not run (dry run, missing checkout, or the user declined), ``built`` on
     success, ``failed`` on a build error.
+
+    Before anything else, stages a configme-defined machine into the checkout
+    (see ``_stage_build_machine_file``) so ``build.py -m {machine}`` resolves a
+    machine configme knows but build.py's bundled ``machines/`` does not.
     """
     nc_env = ""
     if info is not None and info.nc_froot and info.nc_croot:
@@ -1215,6 +1252,12 @@ def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
     cmd = f"{nc_env}./build.py --variant both -m {machine} -c {compiler}"
     runner.emit(f"# {node.name}: build with autotools (slow, ~10-30 min):")
     runner.emit(f"(cd {dest} && {cmd})")
+
+    # Make `-m {machine}` resolvable when the machine is configme-defined rather
+    # than one of build.py's bundled ones: copy the user's configme-tier TOML
+    # into the checkout. Done before the defer/early-return below so a later
+    # manual `-m {machine}` run works even when the build itself is deferred.
+    _stage_build_machine_file(dest, machine, project, runner.dry_run, confirm_fn)
 
     def _defer() -> None:
         print(f"  - {node.name}: build.py-style; run when ready:")
