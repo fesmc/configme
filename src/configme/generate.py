@@ -13,6 +13,10 @@ after the placeholder, so the include is visible to anyone reading the
 template by hand. configme only ensures ``common.mk`` exists in the package's
 ``config/`` (copying a shipped overlay when needed — see ``ensure_common``).
 
+Because the include is the template's responsibility, ``generate_makefile``
+fails loudly when a ``common.mk`` is present but the template forgot to include
+it — otherwise the generated Makefile would silently drop the dependency wiring.
+
 See docs/DESIGN.md sec. 2 and sec. 5. The three-tier fragment lookup
 (orchestrator/user/shipped) and the .configme manifest come in later slices;
 this module currently resolves fragments from the shipped registry and reads
@@ -40,6 +44,11 @@ OVERLAYS_DIR = data.DATA_DIR / "overlays"
 # A machine fragment "provides netCDF" (and thus overrides auto-detection) if it
 # assigns any of these variables.
 _NETCDF_ASSIGN = re.compile(r"^\s*(INC_NC|LIB_NC|NC_FROOT|NC_CROOT)\s*=", re.M)
+
+# A template "pulls in common.mk" if it has a make `include` (or `-include`)
+# directive referencing a *common.mk path. Used to fail loudly when a package
+# ships a common.mk but its template forgot to include it (see generate_makefile).
+_INCLUDES_COMMON = re.compile(r"^\s*-?include\b[^\n]*\bcommon\.mk\b", re.M)
 
 
 class GenerateError(Exception):
@@ -105,6 +114,22 @@ def generate_makefile(root: Path, machine: str, compiler: str,
     if PLACEHOLDER not in template:
         raise GenerateError(
             f"template {template_path} has no {PLACEHOLDER} placeholder"
+        )
+
+    # Failsafe: a package's dependency wiring lives in its common.mk, which
+    # configme does NOT inline — the template must pull it in with its own
+    # `include config/common.mk` (see module docstring). If a common.mk exists
+    # but the template forgot the include (a half-finished migration), the
+    # generated Makefile would silently drop all dependency wiring (FESMUTILS,
+    # LIS, …) and the build would fail to find its dependencies. Fail loudly,
+    # with the fix, rather than emit a quietly-broken Makefile.
+    if has_common(cfgroot) and not _INCLUDES_COMMON.search(template):
+        raise GenerateError(
+            f"{template_path} ships a common.mk but does not `include "
+            f"config/common.mk` — the dependency wiring it defines (FESMUTILS, "
+            f"LIS, …) would be dropped from the generated Makefile. Add "
+            f"`include config/common.mk` right after {PLACEHOLDER} in the "
+            f"template (mirror the package's main-branch Makefile)."
         )
 
     compiler_mk = Path(compiler_path).read_text()
