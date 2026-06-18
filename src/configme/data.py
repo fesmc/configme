@@ -64,17 +64,25 @@ def _load_toml(path: Path) -> dict:
 
 @dataclass
 class Link:
-    """A build symlink a package/orchestrator needs: <dir>/<path> -> <dep>."""
+    """A build symlink a package/orchestrator needs: <dir>/<path> -> <dep>.
+
+    ``nest`` flips the relationship from "symlink to a shared root clone" to
+    "clone the dependency *inside* this package's checkout at ``path``". Used for
+    a dependency exclusive to one consumer (e.g. yelmo's FastHydrology), so it
+    lives under its consumer (``yelmo/FastHydrology``) in every orchestrator
+    rather than at the root. A shared dependency (e.g. fesm-utils) keeps the
+    default symlink form."""
 
     dep: str
     path: str  # relative to the package dir; defaults to the dep name
+    nest: bool = False
 
     @classmethod
     def from_dict(cls, d: dict, source: Path) -> "Link":
         dep = d.get("dep")
         if not dep:
             raise DataError(f"{source}: a [[links]] entry is missing 'dep'")
-        return cls(dep=dep, path=d.get("path", dep))
+        return cls(dep=dep, path=d.get("path", dep), nest=bool(d.get("nest", False)))
 
 
 @dataclass

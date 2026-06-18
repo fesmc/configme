@@ -12,7 +12,12 @@ config_style = "makefile-template"
 [[package.links]]
 dep = "fesm-utils"
 
-# yelmo source `use`s FastHydrology modules, so yelmo links to the sibling
-# FastHydrology checkout (yelmo/FastHydrology -> ../FastHydrology under yelmox).
+# yelmo source `use`s FastHydrology, which is a yelmo-only dependency. `nest`
+# clones it *inside* yelmo's checkout (yelmo/FastHydrology) in every
+# orchestrator, rather than at the root. The link entry stays: when nested it is
+# a no-op ("exists"), but if FastHydrology is ever placed elsewhere (e.g. a
+# --link target) the link phase still wires yelmo/FastHydrology to it, so a
+# missing link surfaces immediately.
 [[package.links]]
 dep = "FastHydrology"
+nest = true

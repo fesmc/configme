@@ -169,6 +169,45 @@ def _apply_manifest_refs(nodes: List[Node], project) -> None:
             n.ref = ref
 
 
+def _apply_nesting(nodes: List[Node]) -> None:
+    """Anchor a dependency that its consumer nests inside its own checkout.
+
+    A package can flag a dependency link with ``nest = true`` to mean "clone
+    this dependency inside my checkout at ``path``, not at the root" (e.g.
+    yelmo's FastHydrology). This stamps the dependency node with that consumer
+    as its ``parent`` and the link path as its ``subdir``, so ``dest_of`` anchors
+    it under the consumer in every orchestrator.
+
+    The scan is over *all* known packages, not just the planned consumer's node,
+    so the dependency still nests when its consumer is on disk but absent from
+    this plan — e.g. ``configme install FastHydrology`` inside an existing yelmox
+    places it under yelmo (``dest_of`` then resolves yelmo's path via the
+    orchestrator). When no consumer and no orchestrator apply (a standalone
+    ``configme install FastHydrology``, where it is the primary), it falls back
+    to a root clone. An existing parent (a real subpackage) is never overridden."""
+    by_name = {n.name: n for n in nodes}
+    for pkg in data.packages().values():
+        for link in pkg.links:
+            if not link.nest:
+                continue
+            dep = by_name.get(link.dep)
+            if dep is not None and dep.parent is None:
+                dep.parent = pkg.name
+                dep.subdir = link.path
+
+
+def _finalize_plan(primary: Node, nodes: List[Node], explicit: bool,
+                   orch: "Optional[data.Orchestrator]") -> Plan:
+    """Assemble the Plan and apply the shared post-passes every install/config
+    path needs: nest dependencies inside their consumer (``_apply_nesting``),
+    then reorder so a nested checkout follows its container
+    (``_order_nested_after_container``)."""
+    _apply_nesting(nodes)
+    plan = Plan(primary, nodes, explicit, orch)
+    _order_nested_after_container(plan)
+    return plan
+
+
 def build_plan(target: str, *, only: bool = False) -> Plan:
     """Resolve a target string into an ordered install/config Plan.
 
@@ -189,7 +228,7 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         orch = orchs.get(primary.name) if primary.is_orchestrator else None
         expanded = _with_subpackages(nodes)
         _apply_component_refs(expanded, orch)
-        return Plan(primary, expanded, explicit=True, orchestrator=orch)
+        return _finalize_plan(primary, expanded, True, orch)
 
     primary = _node_for(target)
 
@@ -198,8 +237,7 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         # are part of the same checkout, not separate dependencies). Marked
         # explicit so the link phase treats any deps as pending.
         orch = orchs.get(primary.name) if primary.is_orchestrator else None
-        return Plan(primary, _with_subpackages([primary]), explicit=True,
-                    orchestrator=orch)
+        return _finalize_plan(primary, _with_subpackages([primary]), True, orch)
 
     if primary.is_orchestrator:
         orch = orchs[primary.name]
@@ -224,14 +262,13 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         nodes = comp_nodes + [primary]
         expanded = _with_subpackages(nodes)
         _apply_component_refs(expanded, orch)
-        return Plan(primary, expanded, explicit=False, orchestrator=orch)
+        return _finalize_plan(primary, expanded, False, orch)
 
     # single package: its deps (auto) then itself
     order: List[str] = []
     _resolve_deps(primary.name, pkgs, order)
     nodes = [_node_for(n) for n in order]
-    return Plan(primary, _with_subpackages(nodes), explicit=False,
-                orchestrator=None)
+    return _finalize_plan(primary, _with_subpackages(nodes), False, None)
 
 
 # --------------------------------------------------------------- runner
@@ -586,15 +623,64 @@ def _host_orchestrator_for(target_name: str,
 def dest_of(node: Node, plan: Plan, root: Path) -> Path:
     if node.name == plan.primary.name:
         return root
-    # A subpackage lives inside its parent's checkout, so anchor it to the
-    # parent's dest (which already accounts for orchestrator component_paths).
+    # A subpackage (or a nested dependency) lives inside its parent's checkout,
+    # so anchor it to the parent's dest (which already accounts for orchestrator
+    # component_paths).
     if node.parent is not None:
         parent = next((n for n in plan.nodes if n.name == node.parent), None)
         if parent is not None:
             return dest_of(parent, plan, root) / node.subdir
+        # Parent not in this plan (e.g. installing only a nested dependency into
+        # an existing orchestrator): resolve the parent's location from the
+        # orchestrator so the dependency still lands inside it.
+        if plan.orchestrator is not None:
+            pkgs = data.packages()
+            parent_dir = pkgs[node.parent].dir if node.parent in pkgs else node.parent
+            parent_dir = plan.orchestrator.component_paths.get(node.parent, parent_dir)
+            return root / parent_dir / node.subdir
     if plan.orchestrator is not None:
         return root / plan.orchestrator.component_paths.get(node.name, node.dir)
     return root / node.dir
+
+
+def _order_nested_after_container(plan: "Plan") -> None:
+    """Reorder ``plan.nodes`` so a component cloned *inside* another component's
+    checkout is cloned/configured *after* that container.
+
+    Dependency resolution (``_resolve_deps``) orders deps before dependents, so
+    a dependency nested inside its consumer's checkout (e.g. FastHydrology at
+    ``yelmo/FastHydrology`` via a ``nest`` link, see ``_apply_nesting``) would
+    otherwise come *before* its container. Cloning it first creates a non-empty
+    ``yelmo/`` that then blocks yelmo's own clone. configme
+    never compiles here (the config step only writes Makefiles), so there is no
+    real dep-order constraint between the two — the only hard requirement is
+    that a containing checkout exist before anything nested in it.
+
+    This stable topological pass enforces exactly that and leaves every
+    unrelated pair in its original (dependency) order. It is a no-op for
+    subpackages (already inserted right after their parent by
+    ``_with_subpackages``) and for components that nest in nobody (bgc/vilma sit
+    in the primary's tree, which is cloned first and excluded here)."""
+    root = Path("/")
+    rel = {n.name: dest_of(n, plan, root) for n in plan.nodes}
+
+    def is_container(outer: Node, inner: Node) -> bool:
+        # The root (primary checkout) is a parent of everything but is cloned
+        # first and handled separately, so it must not force an ordering here.
+        outer_dest = rel[outer.name]
+        return outer_dest != root and outer_dest in rel[inner.name].parents
+
+    remaining = list(plan.nodes)
+    ordered: List[Node] = []
+    while remaining:
+        for i, n in enumerate(remaining):
+            if not any(is_container(m, n) for m in remaining if m is not n):
+                ordered.append(remaining.pop(i))
+                break
+        else:  # pragma: no cover - unreachable unless dest paths form a cycle
+            ordered.extend(remaining)
+            break
+    plan.nodes = ordered
 
 
 def _stamp_note(path: Path, machine: str, compiler: str) -> str:

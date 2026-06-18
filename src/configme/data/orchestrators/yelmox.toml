@@ -21,6 +21,10 @@ default_packages = [
     "rembo1",
 ]
 
+# FastHydrology is cloned inside yelmo's checkout (yelmo/FastHydrology), not at
+# the orchestrator root — this is declared generally by yelmo's `nest` link
+# (see packages/yelmo.toml), so it holds in every orchestrator, not just here.
+
 # Typed post-config extras (see docs/DESIGN.md sec. 12). Each is a built-in
 # handler; user/machine-specific values (hpc/account, data paths) are read from
 # .configme/config.toml or prompted — never shipped, never arbitrary shell.

@@ -213,6 +213,65 @@ def test_root_for_uses_cwd_when_manifest_names_primary(tmp_path):
     assert root == tmp_path
 
 
+# ------------------------------------------------- nested-dependency placement
+
+def _order(plan):
+    return [n.name for n in plan.nodes]
+
+
+def _dest_under(tgt, name, root=Path("/r")):
+    plan = install.build_plan(tgt)
+    node = next(n for n in plan.nodes if n.name == name)
+    return plan, install.dest_of(node, plan, root)
+
+
+def test_nest_link_places_dependency_inside_its_consumer_in_every_orchestrator():
+    # yelmo's `nest = true` link makes FastHydrology clone inside yelmo's
+    # checkout (yelmo/FastHydrology), and it must hold in EVERY orchestrator that
+    # pulls yelmo in — not just the one that happens to list FastHydrology.
+    for orch in ("yelmox", "climber-x"):
+        plan, fh = _dest_under(orch, "FastHydrology")
+        yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+        assert fh == install.dest_of(yelmo, plan, Path("/r")) / "FastHydrology"
+        # ...and the dep must be ordered AFTER its container, else cloning it
+        # first creates a non-empty yelmo/ that blocks yelmo's own clone.
+        order = _order(plan)
+        assert order.index("yelmo") < order.index("FastHydrology")
+
+
+def test_nest_link_standalone_install_clones_dependency_at_root():
+    # `configme install FastHydrology` on its own: it is the primary (no yelmo to
+    # nest under), so it clones at the install root, not under a phantom yelmo/.
+    plan, fh = _dest_under("FastHydrology", "FastHydrology")
+    assert plan.primary.name == "FastHydrology"
+    assert fh == Path("/r")
+
+
+def test_nest_link_resolves_via_orchestrator_when_consumer_absent_from_plan():
+    # Installing only the nested dependency into an existing orchestrator
+    # (the `+`-list the "install as a component" prompt replans to): yelmo is not
+    # a node, but FastHydrology must still land under it via the orchestrator.
+    _, fh = _dest_under("yelmox+FastHydrology", "FastHydrology")
+    assert fh == Path("/r/yelmo/FastHydrology")
+
+
+def test_general_nesting_invariant_no_node_precedes_its_container():
+    # The reorder is a general rule: for every orchestrator, a node nested inside
+    # another node's checkout must be ordered after it.
+    root = Path("/r")
+    for orch in data.orchestrators():
+        plan = install.build_plan(orch)
+        order = _order(plan)
+        dests = {n.name: install.dest_of(n, plan, root) for n in plan.nodes}
+        for inner in plan.nodes:
+            for outer in plan.nodes:
+                if outer is inner or dests[outer.name] == root:
+                    continue
+                if dests[outer.name] in dests[inner.name].parents:
+                    assert order.index(outer.name) < order.index(inner.name), (
+                        f"{orch}: {inner.name} (in {outer.name}) ordered before it")
+
+
 # ----------------------------------------------------- install pip-tool shortcut
 
 def test_install_runme_dry_run_prints_pip_command(capsys, monkeypatch):

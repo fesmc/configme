@@ -413,6 +413,19 @@ concerns:
   package's checkout: listed in the parent's `subpackages`, expanded into the
   plan right after the parent, and located relative to the parent's dest (so
   they follow any orchestrator `component_paths`).
+- **Nested dependencies** are the general mechanism for a *separately cloned*
+  dependency that belongs inside one consumer rather than at the root. The
+  consumer flags the dependency's link with `nest = true` (e.g. yelmo's
+  `[[package.links]] dep = "FastHydrology"`), and configme clones the dependency
+  inside the consumer's checkout (`yelmo/FastHydrology`) in **every**
+  orchestrator — not per-orchestrator `component_paths`. It is located relative
+  to the consumer's dest (resolved via the orchestrator when the consumer itself
+  is absent from the plan), reordered to clone after its container, and falls
+  back to a root clone when installed standalone (it is then the primary). The
+  link entry is kept as a self-healing check: a no-op when the dependency is
+  already nested, but it (re)wires the symlink if the dependency is placed
+  elsewhere (e.g. a `--link` target). Unlike a subpackage, the dependency is its
+  own repo (`clone = true`) and can be installed on its own.
 
 ---
 
