@@ -30,8 +30,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from configme import (__version__, context, data, generate, install, netcdf,
-                      status)
+from configme import (__version__, context, data, extras, generate, install,
+                      netcdf, status)
 from configme import git as git_mod
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
@@ -537,13 +537,18 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _install_pip_tool(name: str, *, dry_run: bool) -> int:
-    """`configme install <tool>` for a tool in ``_PIP_TOOLS``: shortcut to
-    ``pip install -U git+https://github.com/fesmc/<tool>``, the same URL the
-    ``pip_package`` orchestrator extra uses. Other ``install`` flags
-    (``-m``/``-c``/``--dir``/``--build-deps``/``-d``) do not apply and are
-    ignored — this is purely a pip shellout, not a managed-package install."""
-    url = f"git+https://github.com/fesmc/{name}"
+def _install_pip_tool(name: str, ref: "str | None", *, dry_run: bool) -> int:
+    """`configme install <tool>[:ref]` for a tool in ``_PIP_TOOLS``: shortcut to
+    ``pip install -U git+https://github.com/fesmc/<tool>[@ref]``, the same URL
+    the ``pip_package`` orchestrator extra uses. A ``:ref`` pins a version, tag,
+    branch, or commit; a pinned version that is already installed is skipped.
+    Other ``install`` flags (``-m``/``-c``/``--dir``/``--build-deps``/``-d``) do
+    not apply and are ignored — this is purely a pip shellout, not a
+    managed-package install."""
+    if extras.pip_tool_satisfied(name, ref):
+        print(f"configme install {name}: {ref} already installed; nothing to do")
+        return 0
+    url = extras.pip_tool_url(name, ref)
     cmd = [sys.executable, "-m", "pip", "install", "-U", url]
     if dry_run:
         print("DRY RUN — no changes will be made.")
@@ -560,8 +565,12 @@ def _install_pip_tool(name: str, *, dry_run: bool) -> int:
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    if args.target in _PIP_TOOLS:
-        return _install_pip_tool(args.target, dry_run=args.dry_run)
+    # A pip tool may carry a `:ref` pin (`runme:v0.3.1`); split before matching
+    # so the bare name is checked against the pip-tool list. Non-tool targets are
+    # passed through verbatim — their refs come from manifests/orchestrators.
+    name, ref = data.split_ref(args.target)
+    if name in _PIP_TOOLS:
+        return _install_pip_tool(name, ref, dry_run=args.dry_run)
     return install.run_install(
         args.target,
         download=args.download,

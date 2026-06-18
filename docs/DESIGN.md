@@ -527,7 +527,12 @@ in its TOML — **not** as arbitrary shell hooks.
 Initial types (those yelmox needs today):
 
 - `pip_package` — `pip install -U` a command (e.g. `runme`); pip installs it if
-  missing or upgrades it if out of date.
+  missing or upgrades it if out of date. An entry may pin a version/ref with the
+  same `name:ref` syntax git components use (e.g. `runme:v0.3.1`), which appends
+  `@ref` to the git URL. A pinned *version* that already matches the installed
+  package is skipped; branch/commit refs can't be confirmed installed (package
+  metadata records a version, not the git ref) so they always (re)install. The
+  same applies to the `configme install <tool>[:ref]` shortcut.
 - `runme_config` — `runme config init` (seeds `.runme/config.toml` from
   `.runme/config.default.toml`), then patch `hpc`/`account` in place.
 - `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`). An

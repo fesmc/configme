@@ -283,7 +283,7 @@ def test_install_runme_dry_run_prints_pip_command(capsys, monkeypatch):
         "configme.cli.subprocess.run",
         lambda *a, **kw: called.append((a, kw)) or None,
     )
-    rc = cli._install_pip_tool("runme", dry_run=True)
+    rc = cli._install_pip_tool("runme", None, dry_run=True)
     out = capsys.readouterr().out
     assert rc == 0
     assert called == []                          # dry-run: no subprocess
@@ -291,6 +291,33 @@ def test_install_runme_dry_run_prints_pip_command(capsys, monkeypatch):
     expected = (f"{sys.executable} -m pip install -U "
                 "git+https://github.com/fesmc/runme")
     assert expected in out
+
+
+def test_install_runme_pinned_ref_builds_at_ref_url(capsys, monkeypatch):
+    """`configme install runme:v0.3.1 --dry-run` pins the git URL with `@ref`."""
+    monkeypatch.setattr("configme.cli.subprocess.run",
+                        lambda *a, **kw: None)
+    # Not installed at that version → no skip, proceeds to (dry) install.
+    monkeypatch.setattr("configme.extras.pip_tool_satisfied",
+                        lambda name, ref: False)
+    rc = cli._install_pip_tool("runme", "v0.3.1", dry_run=True)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert ("git+https://github.com/fesmc/runme@v0.3.1" in out)
+
+
+def test_install_runme_pinned_already_installed_skips(capsys, monkeypatch):
+    """A pinned version already installed is a no-op — no pip shellout."""
+    called = []
+    monkeypatch.setattr("configme.cli.subprocess.run",
+                        lambda *a, **kw: called.append(a) or None)
+    monkeypatch.setattr("configme.extras.pip_tool_satisfied",
+                        lambda name, ref: True)
+    rc = cli._install_pip_tool("runme", "v0.3.1", dry_run=False)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert called == []                          # satisfied: nothing run
+    assert "already installed" in out
 
 
 def test_install_runme_dispatches_to_pip_not_build_plan(monkeypatch):

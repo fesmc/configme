@@ -6,7 +6,10 @@ specific values (hpc/account, data paths) come from ``.configme/config.toml`` or
 an interactive prompt; nothing site-specific is shipped.
 
 Handlers:
-    pip_package = ["runme", ...]   pip install -U (install or update via pip)
+    pip_package = ["runme", ...]   pip install -U (install or update via pip).
+                                   Pin a version/ref with `name:ref`
+                                   (e.g. "runme:v0.3.1"); a pinned version that
+                                   is already installed is skipped.
     runme_config = true            `runme config init` + patch .runme/config.toml
                                    (hpc/account)
     data_link = ["ice_data", ...]  symlink runtime data dirs
@@ -52,16 +55,65 @@ class _Ask(Protocol):
                  complete_paths: bool = False) -> Optional[str]: ...
 
 
+def pip_tool_url(name: str, ref: Optional[str] = None) -> str:
+    """Git URL for a fesmc pip tool, optionally pinned to a ``ref`` (branch, tag,
+    or commit) using pip's ``@ref`` VCS syntax — e.g. ``runme`` →
+    ``git+https://github.com/fesmc/runme`` and ``runme`` @ ``v0.3.1`` →
+    ``…/runme@v0.3.1``."""
+    url = f"git+https://github.com/fesmc/{name}"
+    return f"{url}@{ref}" if ref else url
+
+
+def _installed_version(name: str) -> Optional[str]:
+    """Installed distribution version of ``name`` per package metadata, or
+    ``None`` if not installed (or metadata is unavailable)."""
+    from importlib.metadata import PackageNotFoundError, version
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
+
+
+def pip_tool_satisfied(name: str, ref: Optional[str]) -> bool:
+    """Whether a pinned ``ref`` is already the installed version, so the pip
+    install can be skipped.
+
+    Only a *version* ref can be confirmed this way: package metadata records a
+    PEP 440 version (e.g. ``0.3.1``), not the git branch/commit a build came
+    from. So a version tag (``v0.3.1`` / ``0.3.1``) that equals the installed
+    version is "satisfied"; a branch or commit ref never matches and always
+    (re)installs, and an unpinned ``None`` ref is never satisfied (the caller
+    upgrades to latest). A leading ``v`` on the tag is ignored when comparing."""
+    if not ref:
+        return False
+    installed = _installed_version(name)
+    if installed is None:
+        return False
+    norm = lambda s: s[1:] if s.startswith("v") else s
+    return norm(installed) == norm(ref)
+
+
 def _pip_package(value, runner, root: Path, cfg: dict, ask,
                  confirm=None, followups=None, machine: Optional[str] = None) -> str:
-    names = value if isinstance(value, list) else [value]
+    # Imported lazily to avoid an install <-> extras import cycle.
+    from configme.data import split_ref
+
+    specs = value if isinstance(value, list) else [value]
     status = []
-    for name in names:
-        url = f"git+https://github.com/fesmc/{name}"
-        # Always `pip install -U`: pip decides whether the package is missing or
-        # out of date and installs/upgrades as needed. We don't pre-check with
-        # `command -v`/`shutil.which` — that only tells us a command exists, not
-        # whether it's current, and would skip available updates.
+    for spec in specs:
+        # `name:ref` pins a release version (or any branch/tag/commit), mirroring
+        # how git components pin refs (`yelmo:climber-x`). Bare `name` is unpinned.
+        name, ref = split_ref(spec)
+        url = pip_tool_url(name, ref)
+        # Pinned to a version that's already installed? Nothing to do. (Only
+        # version refs can be confirmed installed — see `pip_tool_satisfied`.)
+        if pip_tool_satisfied(name, ref):
+            runner.emit(f"# pip_package {name}: {ref} already installed; skipping")
+            print(f"  pip_package {name}: {ref} already installed; skipping")
+            status.append(f"{name}=present")
+            continue
+        # `-U` so an unpinned tool tracks latest and a pinned-but-mismatched one
+        # is replaced; the `@ref` in the URL fixes exactly what gets fetched.
         runner.emit(f"pip install -U {url}")
         if runner.dry_run:
             print(f"  pip_package {name}: (dry) pip install -U ({url})")
