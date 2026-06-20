@@ -84,6 +84,52 @@ def build_clone_url(host: str, org: str, repo: str, download: str) -> str:
     return f"git@{host}:{org}/{repo}.git"
 
 
+def resolve_repo_selectors(entries: List[str],
+                           candidates: List[Tuple[str, Path]]) -> set:
+    """Resolve ``--repos`` entries to a set of package names.
+
+    Each entry is either a **package name** or a **filesystem path** to where a
+    managed checkout already lives. ``candidates`` is the ``[(name, dest), ...]``
+    this command can act on (all plan checkouts for ``upgrade``; the present ones
+    for ``git``). Resolution is name-first:
+
+      * an entry equal to a candidate name is used directly;
+      * otherwise it is treated as a path — ``~``/vars expanded, made absolute
+        relative to cwd, symlinks followed (``resolve()``) — and matched against
+        the candidates' resolved ``dest`` paths, so pointing at a checkout's real
+        location (including a ``--link`` target outside the root) selects it.
+
+    Name wins over a path that merely happens to exist, so a real package name is
+    never shadowed by the cwd. Unknown entries raise ``InstallError`` listing the
+    available names."""
+    names = {name for name, _ in candidates}
+    by_path: Dict[Path, str] = {}
+    for name, dest in candidates:
+        try:
+            by_path.setdefault(Path(dest).resolve(), name)
+        except OSError:
+            pass
+    selected: set = set()
+    unknown: List[str] = []
+    for e in entries:
+        if e in names:
+            selected.add(e)
+            continue
+        try:
+            p = Path(os.path.expandvars(os.path.expanduser(e))).resolve()
+        except OSError:
+            p = None
+        if p is not None and p in by_path:
+            selected.add(by_path[p])
+            continue
+        unknown.append(e)
+    if unknown:
+        raise InstallError(
+            f"--repos: unknown repo(s) or path(s) {', '.join(unknown)}. "
+            f"available: {', '.join(sorted(names))}")
+    return selected
+
+
 def _node_for(name: str) -> Node:
     orchs = data.orchestrators()
     pkgs = data.packages()
@@ -1124,20 +1170,16 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
             f"{root} does not exist — nothing to upgrade. Run "
             f"`configme install {target}` first.")
 
-    # --repos a,b narrows the run to a named subset of checkouts. The universe is
-    # every clone node in the plan — which now includes the orchestrator's
+    # --repos a,b narrows the run to a named subset of checkouts. Each entry is a
+    # package name or a path to where the checkout lives; the candidates are
+    # every clone node in the plan — which includes the orchestrator's
     # data_packages (auxiliary/data repos), so no special-casing is needed.
-    # Validate and fail fast with the available list; `selected=None` means
-    # "everything" (no filter).
+    # `selected=None` means "everything" (no filter).
     selected: Optional[set] = None
     if repos:
-        universe = [n.name for n in plan.nodes if n.clone]
-        unknown = [r for r in repos if r not in universe]
-        if unknown:
-            raise InstallError(
-                f"--repos: unknown repo(s) {', '.join(unknown)}. "
-                f"available: {', '.join(universe)}")
-        selected = set(repos)
+        candidates = [(n.name, dest_of(n, plan, root))
+                      for n in plan.nodes if n.clone]
+        selected = resolve_repo_selectors(repos, candidates)
 
     # Same selection the install used, reused from config.toml unless -m/-c
     # override it; persisted back so a retarget sticks for later runs.

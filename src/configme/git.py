@@ -107,12 +107,11 @@ def run_git(target: Optional[str], git_args: List[str], *,
 
     wanted = _parse_repos(repos)
     if wanted is not None:
-        unknown = [n for n in wanted if n not in {name for name, _ in available}]
-        if unknown:
-            raise GitError(
-                f"unknown repo(s): {', '.join(unknown)}. "
-                f"available: {', '.join(n for n, _ in available)}")
-        selected = [(n, d) for n, d in available if n in wanted]
+        # Each --repos entry is a package name or a path to where the checkout
+        # lives; resolve against the present checkouts (the repos git can act
+        # on). Unknown entries raise (InstallError, caught alongside GitError).
+        selected_names = install.resolve_repo_selectors(wanted, available)
+        selected = [(n, d) for n, d in available if n in selected_names]
     else:
         selected = available
 

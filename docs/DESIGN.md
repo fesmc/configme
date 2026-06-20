@@ -275,8 +275,12 @@ left to the user. After the components it refreshes the orchestrator's
 `data_packages` (a present data repo like climber-x's `input` is pulled in
 place) and re-runs the action extras; each is an opt-in Y/n defaulting to
 **no**, `-y` forces every prompt so the whole run is unattended, and
-`--repos a,b` narrows the run to a named subset of checkouts (components and/or
-data repos).
+`--repos a,b` narrows the run to a subset of checkouts (components and/or data
+repos). Each `--repos` entry is a package name **or** a path to where the
+checkout lives — a path is matched against the managed checkouts (`--link`
+targets and symlinks resolved) and mapped back to the package name, so a user
+can point at a directory without recalling its package name. The same resolver
+backs `configme git --repos`.
 
 Because upgrade never clones, a `data`/`optional`/`prompt` package that was
 never installed stays absent. Rather than silently skip it, upgrade ends with a

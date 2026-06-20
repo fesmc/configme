@@ -193,14 +193,20 @@ offered a re-run, each a `y/N` prompt (default **no**). To run the whole upgrade
 unattended, pass `-y` — it answers yes to *every* prompt (ref switches, rebuilds,
 data-repo pulls), so `configme upgrade -y` needs no input.
 
-To touch only specific checkouts, use `--repos` with a comma-separated list of
-names — components and/or data repos (by their package name):
+To touch only specific checkouts, use `--repos` with a comma-separated list —
+components and/or data repos. Each entry is either a **package name** or a
+**path** to where the checkout already lives (handy when you don't recall the
+package name): a path is matched against the managed checkouts, `--link` targets
+and symlinks included, and resolved back to the package name.
 
 ```bash
 configme upgrade -y                            # pull/refresh everything, no prompts
-configme upgrade --repos climber-x-input       # only the input data repo
-configme upgrade --repos yelmo,climber-x-input # just these two checkouts
+configme upgrade --repos climber-x-input       # by package name
+configme upgrade --repos ./input               # by path — resolves to climber-x-input
+configme upgrade --repos yelmo,./input         # mix names and paths
 ```
+
+The same `--repos` (name or path) applies to `configme git`.
 
 ### Check what is still pending
 

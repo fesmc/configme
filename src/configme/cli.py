@@ -619,7 +619,8 @@ def cmd_git(args: argparse.Namespace) -> int:
     The git argv is fully pass-through (no allowlist): the per-repo
     confirmation is the safety gate. With no ``--target``, operates on the
     current orchestrator/package (same resolution as ``upgrade``/``status``);
-    ``--repos`` narrows the run to a comma-separated subset of managed repos."""
+    ``--repos`` narrows the run to a comma-separated subset, each entry a
+    package name or a path to where the checkout lives."""
     target = args.target or _bare_target(Path.cwd())
     return git_mod.run_git(target, list(args.args or []),
                            repos=args.repos, yes=args.yes, confirm_fn=_confirm)
@@ -631,9 +632,10 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
     current checkout's primary (orchestrator or package) + its deps.
 
     ``-y/--yes`` answers every prompt yes, so the whole upgrade runs
-    unattended — including the orchestrator's extra repos (e.g. climber-x's
-    ``input``), whose pull/clone prompts default to no. ``--repos a,b`` narrows
-    the run to a named subset of checkouts (components and/or extra repos)."""
+    unattended — including the orchestrator's data repos (e.g. climber-x's
+    ``input``), whose pull prompts default to no. ``--repos a,b`` narrows the run
+    to a subset of checkouts, each given by package name or by path to where the
+    checkout lives."""
     target = args.target or _bare_target(Path.cwd())
     # -y forces every confirmation (ref switches, builds, and the default-no
     # extra-repo pulls/clones) without prompting; otherwise prompt interactively.
@@ -788,9 +790,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "whose pull/clone prompts otherwise default to no.")
     p_upgrade.add_argument(
         "--repos", metavar="A,B", default=None,
-        help="comma-separated subset of checkouts to upgrade — managed "
-        "components and/or the orchestrator's extra repos (by dir, e.g. "
-        "`input`). Everything else is left untouched.")
+        help="comma-separated subset of checkouts to upgrade — components "
+        "and/or data repos. Each is a package name or a path to where the "
+        "checkout lives (resolved to its package). Everything else is left "
+        "untouched.")
     p_upgrade.add_argument(
         "--link", action="append", metavar="PKG=PATH", default=None,
         help="(re)point an existing on-disk checkout of PKG at a different "
@@ -807,8 +810,9 @@ def _build_parser() -> argparse.ArgumentParser:
                        help="orchestrator or package whose repo set to use "
                        "(default: the current directory's)")
     p_git.add_argument("--repos", default=None,
-                       help="comma-separated subset of managed repo names to "
-                       "operate on (default: all)")
+                       help="comma-separated subset of repos to operate on — "
+                       "each a package name or a path to where the checkout "
+                       "lives (default: all)")
     p_git.add_argument("-y", "--yes", action="store_true",
                        help="skip the per-repo Y/n prompt (one-way). Read-only "
                        "git verbs (status, log, diff, fetch, ...) auto-confirm "
