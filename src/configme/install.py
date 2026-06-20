@@ -48,10 +48,12 @@ class Node:
     # components that pin one (e.g. climber-x's yelmo -> ``climber-x`` branch).
     host: str = "github.com"
     ref: Optional[str] = None
-    # Optional component: a clone failure is a soft skip (recorded as
-    # "unavailable"), not a hard install failure. ``submodules`` runs
-    # `git submodule update --init --recursive` after cloning.
-    optional: bool = False
+    # How this checkout's absence is handled at clone time: "required" (a clone
+    # failure is fatal), "optional" (a failure is a soft "unavailable" skip — a
+    # private repo the user may lack access to), or "prompt" (not cloned unless
+    # the user opts in, default no — a large/expensive repo). See data.Package.
+    # ``submodules`` runs `git submodule update --init --recursive` after clone.
+    clone_policy: str = "required"
     submodules: bool = False
     # For a subpackage node: the parent package name and the path relative to the
     # parent's dest (so its location follows the parent under any orchestrator).
@@ -91,7 +93,8 @@ def _node_for(name: str) -> Node:
         return Node(p.name, p.org, p.repo, p.dir, p.config_style,
                     p.config_subdir, p.links, False,
                     clone=p.clone, subpackages=p.subpackages, build=p.build,
-                    host=p.host, optional=p.optional, submodules=p.submodules)
+                    host=p.host, clone_policy=p.clone_policy,
+                    submodules=p.submodules)
     known = sorted(set(orchs) | set(pkgs))
     raise InstallError(f"unknown target '{name}'. Supported: {', '.join(known)}")
 
@@ -257,7 +260,7 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         for n in opt_only:
             node = _node_for(n)
             if n in opt_names:
-                node.optional = True
+                node.clone_policy = "optional"
             comp_nodes.append(node)
         nodes = comp_nodes + [primary]
         expanded = _with_subpackages(nodes)
@@ -868,7 +871,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             ref_note = f" (ref {node.ref})" if node.ref else ""
             print(f"  clone {node.name}: {st}{ref_note}")
         except (InstallError, subprocess.CalledProcessError) as e:
-            if node.optional:
+            if node.clone_policy == "optional":
                 # Optional component (often a private repo): no access just means
                 # this build variant is unavailable — note it and carry on.
                 print(f"  - {node.name}: optional; not cloned ({e}); skipping")

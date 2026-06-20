@@ -1,8 +1,8 @@
 # vilma: VILMA solid-earth model (used by climber-x's fully-coupled build).
 #
 # Private repo (cxesmc/vilma): access is granted on request, so most users will
-# not have it. Declared `optional` — configme attempts the clone and, if it is
-# inaccessible, records it as "unavailable" in the summary instead of failing.
+# not have it. `clone_policy = "optional"` — configme attempts the clone and, if
+# it is inaccessible, records it as "unavailable" in the summary, not a failure.
 #
 # Provides a prebuilt library (vega_pism.a) and headers referenced by climber-x's
 # FULL build variant; configme clones it but does not configure or build it
@@ -14,4 +14,4 @@ org = "cxesmc"
 repo = "vilma"
 dir = "vilma"
 config_style = "none"
-optional = true
+clone_policy = "optional"

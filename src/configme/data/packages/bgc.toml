@@ -1,7 +1,7 @@
 # bgc: HAMOCC ocean biogeochemistry (used by climber-x's bgc build variants).
 #
 # Private repo (cxesmc/bgc): access is granted on request under the MPI-ESM
-# license, so most users will not have it. Declared `optional` — configme
+# license, so most users will not have it. `clone_policy = "optional"` — configme
 # attempts the clone and, if it is inaccessible, records it as "unavailable" in
 # the summary instead of failing the install.
 #
@@ -15,5 +15,5 @@ org = "cxesmc"
 repo = "bgc"
 dir = "bgc"
 config_style = "none"
-optional = true
+clone_policy = "optional"
 submodules = true

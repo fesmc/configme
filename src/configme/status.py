@@ -98,9 +98,11 @@ def _inspect_repos(plan, root: Path) -> List[Check]:
         dest = install.dest_of(node, plan, root)
         if _is_checkout(dest):
             out.append(Check("repo", node.name, _OK))
-        elif node.optional:
+        elif node.clone_policy in ("optional", "prompt"):
+            detail = ("optional; not cloned" if node.clone_policy == "optional"
+                      else "not cloned (opt-in)")
             out.append(Check("repo", node.name, "pending",
-                             detail="optional; not cloned",
+                             detail=detail,
                              hint=f"configme install {node.name}"))
         else:
             out.append(Check("repo", node.name, "missing",

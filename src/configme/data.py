@@ -52,6 +52,27 @@ def split_ref(spec: str) -> "tuple[str, Optional[str]]":
     return (name, ref or None) if sep else (name, None)
 
 
+# How a package's absence is handled at clone time (see Package.clone_policy).
+CLONE_POLICIES = ("required", "optional", "prompt")
+
+
+def _parse_clone_policy(pkg: dict, source: Path) -> str:
+    """Resolve a package's ``clone_policy``, accepting the legacy ``optional =
+    true`` flag as an alias for ``"optional"``. Validates against
+    ``CLONE_POLICIES`` so a typo is a data error, not a silent "required"."""
+    legacy = bool(pkg.get("optional", False))
+    policy = pkg.get("clone_policy", "optional" if legacy else "required")
+    if policy not in CLONE_POLICIES:
+        raise DataError(
+            f"{source}: [package] clone_policy '{policy}' is not one of "
+            f"{', '.join(CLONE_POLICIES)}")
+    if legacy and policy != "optional":
+        raise DataError(
+            f"{source}: [package] sets both legacy optional=true and "
+            f"clone_policy='{policy}'; drop optional and keep clone_policy")
+    return policy
+
+
 def _load_toml(path: Path) -> dict:
     try:
         with open(path, "rb") as f:
@@ -166,10 +187,15 @@ class Package:
     # build.py package (fesm-utils' LIS+FFTW) and a `make` package
     # (fesm-utils/utils' libfesmutils). Empty when a package declares none.
     artifacts: Dict[str, List[str]] = field(default_factory=dict)
-    # True for an optional component (often private): a clone failure — e.g. no
-    # access to a private repo — is a soft skip recorded in the summary, never a
-    # hard install failure. (See climber-x's bgc/vilma.)
-    optional: bool = False
+    # How this repo's *absence* is treated (see DESIGN.md sec. 9):
+    #   "required" — cloned on install; a clone failure is a hard error (default)
+    #   "optional" — attempted, but a clone failure (e.g. no access to a private
+    #                repo) is a soft skip recorded as "unavailable", never fatal
+    #                — climber-x's bgc/vilma.
+    #   "prompt"   — not cloned by default; install asks first (default no) and a
+    #                decline is deferred — for large/expensive repos such as
+    #                climber-x's `input` data on GitLab.
+    clone_policy: str = "required"
     # If True, run `git submodule update --init --recursive` after cloning
     # (e.g. bgc carries the M4AGO submodule).
     submodules: bool = False
@@ -199,7 +225,7 @@ class Package:
                 subpackages=list(pkg.get("subpackages", [])),
                 build=BuildSpec.from_dict(build, path) if build else None,
                 artifacts=artifacts,
-                optional=bool(pkg.get("optional", False)),
+                clone_policy=_parse_clone_policy(pkg, path),
                 submodules=bool(pkg.get("submodules", False)),
             )
         except KeyError as e:
