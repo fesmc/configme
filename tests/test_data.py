@@ -79,3 +79,24 @@ def test_shipped_packages_carry_expected_clone_policy():
     assert pkgs["yelmo"].clone_policy == "required"
     assert pkgs["vilma"].clone_policy == "optional"
     assert pkgs["bgc"].clone_policy == "optional"
+
+
+# --------------------------------------------------------------- data_packages
+
+def test_orchestrator_parses_data_packages_with_refs(tmp_path):
+    # data_packages parses like the other component lists, including name:ref.
+    toml = tmp_path / "demo.toml"
+    toml.write_text(
+        '[orchestrator]\n'
+        'name = "demo"\norg = "x"\nrepo = "demo"\ndir = "demo"\n'
+        'config_style = "makefile-template"\n'
+        'default_packages = ["yelmo"]\n'
+        'data_packages = ["input", "obs:v2"]\n')
+    orch = data.Orchestrator.from_file(toml)
+    assert orch.data_packages == ["input", "obs"]
+    assert orch.component_refs["obs"] == "v2"
+
+
+def test_orchestrator_data_packages_defaults_empty():
+    # An orchestrator without the key has no data repos.
+    assert data.orchestrators()["yelmox"].data_packages == []

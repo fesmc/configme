@@ -255,6 +255,12 @@ class Orchestrator:
     # private repos a given user may not have access to: climber-x's bgc/vilma).
     # Same ``name:ref`` syntax as default_packages.
     optional_packages: List[str] = field(default_factory=list)
+    # Auxiliary/data repos (e.g. climber-x's `input` data on GitLab): clone-only
+    # packages that sit *outside* the build graph — not dependency-resolved,
+    # never built, only cloned/pulled/probed. Their per-repo traits (host,
+    # protocol, clone_policy) live in their package file. Same ``name:ref``
+    # syntax. (See DESIGN.md sec. 9.)
+    data_packages: List[str] = field(default_factory=list)
     # name -> git ref (branch/tag/commit) for components that pin one, parsed
     # from ``default_packages`` / ``optional_packages`` entries (``name:ref``).
     component_refs: Dict[str, str] = field(default_factory=dict)
@@ -291,6 +297,7 @@ class Orchestrator:
 
         names = _split(orch.get("default_packages", []))
         optional = _split(orch.get("optional_packages", []))
+        data_pkgs = _split(orch.get("data_packages", []))
         try:
             return cls(
                 name=orch["name"],
@@ -301,6 +308,7 @@ class Orchestrator:
                 host=orch.get("host", "github.com"),
                 default_packages=names,
                 optional_packages=optional,
+                data_packages=data_pkgs,
                 component_refs=refs,
                 extras=dict(orch.get("extras", {})),
                 links=links,

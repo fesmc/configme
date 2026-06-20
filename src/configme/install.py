@@ -265,7 +265,12 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
             if n in opt_names:
                 node.clone_policy = "optional"
             comp_nodes.append(node)
-        nodes = comp_nodes + [primary]
+        # Data/auxiliary repos: clone-only, outside the build graph. No
+        # `_resolve_deps` (they pull in nothing) and they keep their own
+        # clone_policy (e.g. "prompt" for a large data repo). They ride the
+        # normal node pipeline so pull/status/--repos cover them for free.
+        data_nodes = [_node_for(n) for n in orch.data_packages]
+        nodes = comp_nodes + data_nodes + [primary]
         expanded = _with_subpackages(nodes)
         _apply_component_refs(expanded, orch)
         return _finalize_plan(primary, expanded, False, orch)
@@ -815,6 +820,10 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     results = {"cloned": [], "configured": [], "built": [], "linked": [],
                "pending": [], "deferred": [], "skipped": [],
                "unavailable": [], "failed": []}
+    # Commands the user must run later (a declined opt-in clone, a pending link's
+    # missing dependency, a deferred build, then any deferred extras) are
+    # collected here and echoed together in the summary's "Deferred" section.
+    followups: List[str] = []
 
     # Linking the primary makes no sense — that's what --dir is for. Reject
     # explicitly rather than silently doing the wrong thing.
@@ -876,6 +885,23 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 print(f"  ! {node.name}: {e}")
                 results["failed"].append(node.name)
             continue
+        # A `prompt` repo (large/expensive, e.g. a data repo) is opt-in: when it
+        # is not already on disk, ask before cloning (default no). Declining
+        # defers it — the clone is recorded as pending and its command echoed in
+        # the summary. (Dry-run previews the clone instead of prompting.)
+        already = dest.exists() or dest.is_symlink()
+        if (node.clone_policy == "prompt" and not already and not dry_run
+                and download != "no" and confirm_fn is not None
+                and not confirm_fn(
+                    f"Download {node.name}? (large repo, can take a while)",
+                    False)):
+            cmd = f"git clone {runner.clone_url(node)} {dest}"
+            runner.emit(f"# {node.name}: opt-in clone declined; run later: {cmd}")
+            print(f"  - {node.name}: not cloned (opt-in); clone later with:")
+            print(f"      {cmd}")
+            followups.append(cmd)
+            results["pending"].append(node.name)
+            continue
         try:
             st = runner.clone(node, dest)
             ref_note = f" (ref {node.ref})" if node.ref else ""
@@ -901,11 +927,6 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     elif root.exists():
         mf, created = context.write_manifest(root, plan.primary.name, deps)
         print(f"  + wrote {mf}" if created else f"  manifest: using existing {mf}")
-
-    # Commands the user must run later (a pending link's missing dependency, a
-    # deferred build, then any deferred extras) are collected here and echoed
-    # together in the summary's "Deferred" section.
-    followups: List[str] = []
 
     # --- link phase (non-primary packages only)
     runner.emit("\n# --- links ---")
@@ -1179,7 +1200,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
             print(f"    {pkg} -> {path}{_stamp_note(path, machine, compiler)}")
 
     results = {"updated": [], "configured": [], "built": [], "missing": [],
-               "deferred": [], "skipped": [], "failed": []}
+               "deferred": [], "skipped": [], "uninstalled": [], "failed": []}
 
     # --- ref reconcile phase: switch each existing checkout to its resolved ref
     # *before* pulling and reconfiguring. The manifest pin (a package owner may
@@ -1253,7 +1274,14 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
         updated[node.name] = did_update
         print(f"  pull {node.name}: {status}")
         if status == "missing":
-            results["missing"].append(node.name)
+            # An opt-in repo (optional private component, or a prompt/data repo)
+            # that was never installed is an expected absence, not a problem:
+            # upgrade never clones, so remind the user separately rather than
+            # flagging it as "missing".
+            if node.clone_policy in ("optional", "prompt"):
+                results["uninstalled"].append(node.name)
+            else:
+                results["missing"].append(node.name)
         elif status == "dirty":
             results["skipped"].append(node.name)
         elif status == "updated":
@@ -1347,6 +1375,14 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
                 "deferred", "skipped", "failed"):
         if results[key]:
             print(f"  {key}: {', '.join(results[key])}")
+    # Reminder: opt-in repos (optional components, prompt/data repos) that were
+    # never installed. upgrade never clones, so surface them with the command to
+    # fetch them rather than leaving the user to wonder why they were untouched.
+    if results["uninstalled"]:
+        print(f"\nNot installed (upgrade never clones — run "
+              f"`configme install {plan.primary.name}` to fetch):")
+        for name in results["uninstalled"]:
+            print(f"  - {name}")
     return 1 if results["failed"] else 0
 
 
