@@ -47,6 +47,9 @@ class Node:
     # commit) to check out right after cloning. ``ref`` is set for orchestrator
     # components that pin one (e.g. climber-x's yelmo -> ``climber-x`` branch).
     host: str = "github.com"
+    # Per-repo clone transport override ("https"/"ssh"); see data.Package. None
+    # means follow the run's `-d` download mode.
+    protocol: Optional[str] = None
     ref: Optional[str] = None
     # How this checkout's absence is handled at clone time: "required" (a clone
     # failure is fatal), "optional" (a failure is a soft "unavailable" skip — a
@@ -93,8 +96,8 @@ def _node_for(name: str) -> Node:
         return Node(p.name, p.org, p.repo, p.dir, p.config_style,
                     p.config_subdir, p.links, False,
                     clone=p.clone, subpackages=p.subpackages, build=p.build,
-                    host=p.host, clone_policy=p.clone_policy,
-                    submodules=p.submodules)
+                    host=p.host, protocol=p.protocol,
+                    clone_policy=p.clone_policy, submodules=p.submodules)
     known = sorted(set(orchs) | set(pkgs))
     raise InstallError(f"unknown target '{name}'. Supported: {', '.join(known)}")
 
@@ -322,7 +325,14 @@ class Runner:
         self.log.append(line)
 
     def clone_url(self, node: Node) -> str:
-        return build_clone_url(node.host, node.org, node.repo, self.download)
+        # A node may pin its transport with `protocol = "https"/"ssh"` (e.g. a
+        # GitLab repo on a host where only HTTPS login works), overriding the
+        # run's download mode. `-d no` (use existing checkout) is never
+        # overridden — there is nothing to clone.
+        transport = self.download
+        if node.protocol and transport != "no":
+            transport = node.protocol
+        return build_clone_url(node.host, node.org, node.repo, transport)
 
     def clone(self, node: Node, dest: Path) -> str:
         """Clone ``node`` to ``dest`` and, if it pins a ref, check it out.

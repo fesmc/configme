@@ -540,3 +540,34 @@ def test_run_install_skips_prompt_with_install_dir(tmp_path, monkeypatch):
         pass
 
     assert asked == []
+
+
+# --------------------------------------------------- per-repo protocol override
+
+def _bare_node(**over):
+    """Minimal Node for clone_url tests."""
+    kw = dict(name="input", org="cxesmc", repo="climber-x-input", dir="input",
+              config_style="none", config_subdir="", links=[],
+              is_orchestrator=False, host="gitlab.pik-potsdam.de")
+    kw.update(over)
+    return install.Node(**kw)
+
+
+def test_protocol_overrides_download_mode():
+    # A node pinned to https clones over https even on an ssh run.
+    runner = install.Runner(download="ssh")
+    url = runner.clone_url(_bare_node(protocol="https"))
+    assert url == "https://gitlab.pik-potsdam.de/cxesmc/climber-x-input.git"
+
+
+def test_no_protocol_follows_download_mode():
+    runner = install.Runner(download="ssh")
+    url = runner.clone_url(_bare_node())
+    assert url == "git@gitlab.pik-potsdam.de:cxesmc/climber-x-input.git"
+
+
+def test_protocol_never_overrides_download_no():
+    # `-d no` (use existing checkout) is never overridden into a real transport.
+    runner = install.Runner(download="no")
+    url = runner.clone_url(_bare_node(protocol="https"))
+    assert url.startswith("git@")  # build_clone_url's non-https (ssh) form

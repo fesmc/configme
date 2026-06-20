@@ -165,6 +165,11 @@ class Package:
     # Git host the repo is cloned from (default GitHub). Lets a component live on
     # another host (e.g. a GitLab-hosted input repo) without special-casing.
     host: str = "github.com"
+    # Per-repo clone transport override ("https"/"ssh"). Pins this repo's
+    # transport regardless of the run's `-d` download mode — handy for a host
+    # where only HTTPS login is configured (e.g. GitLab). `-d no` (use existing
+    # checkout) is never overridden. None means "follow the run's download mode".
+    protocol: Optional[str] = None
     config_subdir: str = ""  # e.g. fesm-utils keeps its config under utils/
     links: List[Link] = field(default_factory=list)
     # Optional informational list of all config styles a package exposes, for
@@ -218,6 +223,7 @@ class Package:
                 dir=pkg.get("dir", pkg["name"]),
                 config_style=style,
                 host=pkg.get("host", "github.com"),
+                protocol=pkg.get("protocol"),
                 config_subdir=pkg.get("config_subdir", ""),
                 links=links,
                 config_styles=list(pkg.get("config_styles", [])) or [style],
