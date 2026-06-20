@@ -426,21 +426,10 @@ class Runner:
         return "switched"
 
     def pull(self, node: "Node", dest: Path) -> Tuple[str, bool]:
-        """Update a managed component checkout in place — thin wrapper over
-        :meth:`pull_dir` keyed by the node's name (used in the upgrade log and
-        skip messages)."""
-        return self.pull_dir(node.name, dest)
-
-    def pull_dir(self, name: str, dest: Path) -> Tuple[str, bool]:
         """Update an existing checkout at ``dest`` in place. Returns
         ``(status, updated)`` where status is one of: missing | dirty | detached
         | dry | up-to-date | updated, and ``updated`` is True only when the pull
         advanced HEAD (new commits).
-
-        ``name`` is a display label only (the managed component name, or an
-        extra ``git_repo`` dir) — the git operations are entirely path-based, so
-        this is reused for both managed components (via :meth:`pull`) and the
-        auxiliary ``git_repo`` extras refreshed by ``configme upgrade``.
 
         Uses ``git pull --ff-only`` on whatever branch is checked out: a clean
         fast-forward succeeds, anything else (diverged branch, no upstream) is
@@ -448,6 +437,7 @@ class Runner:
         A checkout with uncommitted tracked changes is skipped, not touched.
         A detached HEAD (pinned tag or commit) is skipped: there is no branch
         to fast-forward, and the pin is exactly what the user asked for."""
+        name = node.name
         if not dest.is_dir():
             self.emit(f"# {name}: not present at {dest} (skipped)")
             return "missing", False
@@ -1087,18 +1077,6 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     return 1 if results["failed"] else 0
 
 
-def _extra_git_repo_dirs(orchestrator) -> List[str]:
-    """The ``dir`` names of an orchestrator's ``git_repo`` extras (e.g.
-    climber-x's ``input``) — the auxiliary repos ``configme upgrade`` can
-    refresh and that ``--repos`` may name. Empty for a bare package or an
-    orchestrator with no such extras."""
-    if orchestrator is None:
-        return []
-    entries = (orchestrator.extras or {}).get("git_repo") or []
-    return [e["dir"] for e in entries
-            if isinstance(e, dict) and e.get("dir")]
-
-
 def run_upgrade(target: str, *, install_dir: Optional[str],
                 machine: Optional[str], compiler: Optional[str],
                 build_deps: bool, dry_run: bool, only: bool = False,
@@ -1117,17 +1095,19 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     make-built package — gated like ``install`` (``--build-deps`` forces the
     build, otherwise an interactive prompt asks).
 
-    After the managed components, the orchestrator's typed ``extras`` are run in
-    upgrade mode (install runs them only on first install): each ``git_repo``
-    auxiliary checkout (e.g. climber-x's ``input``) is offered a ``git pull`` in
-    place, and the ``pip_package`` / ``runme_config`` extras are offered a
-    re-run — every one a Y/n prompt defaulting to **no**.
+    Auxiliary/data repos (the orchestrator's ``data_packages``, e.g. climber-x's
+    ``input``) ride the same node pipeline: a present one is pulled, and one that
+    was never installed is reported under a "Not installed" reminder rather than
+    cloned (upgrade never clones). After the components, the orchestrator's typed
+    ``extras`` (post-config *actions* — pip tools, runme config, data links) are
+    re-run in upgrade mode, each a Y/n prompt defaulting to **no**.
 
-    ``repos`` (``--repos a,b``) narrows the whole run — managed components *and*
-    extra repos — to exactly the named checkouts; unknown names fail fast with
-    the available list. ``ask_fn``/``confirm_fn`` are the interactive prompts;
-    passing a confirm that always returns True (``configme upgrade -y``) makes
-    the entire upgrade non-interactive, including the default-no extra prompts."""
+    ``repos`` (``--repos a,b``) narrows the whole run — components and data repos
+    alike — to exactly the named checkouts; unknown names fail fast with the
+    available list (and the action extras are skipped, since they are not repos).
+    ``ask_fn``/``confirm_fn`` are the interactive prompts; passing a confirm that
+    always returns True (``configme upgrade -y``) makes the entire upgrade
+    non-interactive, including the default-no extra prompts."""
     cwd = Path.cwd()
     plan = build_plan(target, only=only)           # fail-fast: unknown names
     if not plan.primary.clone:
@@ -1144,14 +1124,14 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
             f"{root} does not exist — nothing to upgrade. Run "
             f"`configme install {target}` first.")
 
-    # --repos a,b narrows the run to a named subset of checkouts: the managed
-    # components (by package name) plus the orchestrator's auxiliary `git_repo`
-    # extras (by their `dir`). Validate against that universe and fail fast with
-    # the available list; `selected=None` means "everything" (no filter).
-    extra_repo_dirs = _extra_git_repo_dirs(plan.orchestrator)
+    # --repos a,b narrows the run to a named subset of checkouts. The universe is
+    # every clone node in the plan — which now includes the orchestrator's
+    # data_packages (auxiliary/data repos), so no special-casing is needed.
+    # Validate and fail fast with the available list; `selected=None` means
+    # "everything" (no filter).
     selected: Optional[set] = None
     if repos:
-        universe = [n.name for n in plan.nodes if n.clone] + extra_repo_dirs
+        universe = [n.name for n in plan.nodes if n.clone]
         unknown = [r for r in repos if r not in universe]
         if unknown:
             raise InstallError(
@@ -1343,17 +1323,18 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
             elif dest.is_dir():
                 print(f"  - {node.name}: unchanged; skipping rebuild")
 
-    # --- extras (orchestrator post-config steps), in upgrade mode: each is an
-    # opt-in Y/n (default no; -y forces). git_repo refreshes a present auxiliary
-    # checkout with `git pull`; pip_package / runme_config offer a re-run. With
-    # --repos, only the named repo extras run (see run_extras). A deferred step
-    # (declined clone) surfaces in the summary like install's.
-    if plan.orchestrator is not None and plan.orchestrator.extras:
+    # --- extras (orchestrator post-config *actions*: pip tools, runme config,
+    # data links), in upgrade mode: each is an opt-in Y/n (default no; -y
+    # forces). Skipped entirely under --repos, which selects repos — and extras
+    # are not repos (data repos are plan nodes, handled above). A deferred step
+    # surfaces in the summary like install's.
+    if (selected is None and plan.orchestrator is not None
+            and plan.orchestrator.extras):
         cfg = context.load_config(project) if project else {}
         ask = ask_fn or (lambda label, default=None, *, complete_paths=False: default)
         followups = extras_mod.run_extras(
             plan.orchestrator, runner, root, cfg, ask, confirm_fn,
-            machine=machine, upgrade=True, repos=selected)
+            machine=machine, upgrade=True)
         results["deferred"].extend(followups)
 
     # --- reproducibility log

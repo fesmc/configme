@@ -32,6 +32,13 @@ default_packages = ["fesm-utils", "coordinates", "yelmo:climber-x"]
 #   * vilma — VILMA solid-earth model (prebuilt lib for the FULL build variant).
 optional_packages = ["bgc", "vilma"]
 
+# Auxiliary/data repos cloned at the climber-x root, outside the build graph.
+#   * climber-x-input — large CLIMBER-X input data on GitLab, cloned into
+#     ./input. Clone-only and `clone_policy = "prompt"` (its traits live in
+#     packages/climber-x-input.toml), so install asks before the (large) clone
+#     and upgrade refreshes it only when already present.
+data_packages = ["climber-x-input"]
+
 # bgc and vilma live inside climber-x's src/ tree (not at the root).
 [orchestrator.component_paths]
 bgc = "src/bgc"
@@ -41,13 +48,3 @@ vilma = "src/vilma"
 [orchestrator.extras]
 pip_package = ["runme"]       # install the `runme` command if missing
 runme_config = true           # `runme config init` + patch .runme/config.toml
-
-# CLIMBER-X input data lives in a separate GitLab repo (large files), cloned
-# into ./input. Pinned to HTTPS: the GitLab host uses a separate login that is
-# not necessarily set up for SSH on every machine.
-[[orchestrator.extras.git_repo]]
-dir = "input"
-host = "gitlab.pik-potsdam.de"
-org = "cxesmc"
-repo = "climber-x-input"
-protocol = "https"

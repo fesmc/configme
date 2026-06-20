@@ -1,0 +1,23 @@
+# climber-x-input: CLIMBER-X input data (large; GitLab; clone-only).
+#
+# The input data lives in a separate GitLab repo (cxesmc/climber-x-input) and is
+# cloned into ./input at the climber-x root. It is pure data — configme places
+# it but does not configure or build it (`config_style = "none"`).
+#
+# `clone_policy = "prompt"` — because it is large, install asks before cloning
+# (default no) and `configme upgrade` pulls it only if already present, never
+# clones it. `protocol = "https"` pins HTTPS: the GitLab host uses a separate
+# login that is not necessarily set up for SSH on every machine.
+#
+# Referenced from the climber-x orchestrator's `data_packages` list, not built
+# into the dependency graph.
+
+[package]
+name = "climber-x-input"
+org = "cxesmc"
+repo = "climber-x-input"
+dir = "input"
+host = "gitlab.pik-potsdam.de"
+protocol = "https"
+config_style = "none"
+clone_policy = "prompt"

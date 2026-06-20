@@ -180,15 +180,18 @@ def test_runme_config_extra_pending_then_ok(tmp_path):
     assert state_of(checks, "extra", "runme_config") == "ok"
 
 
-def test_git_repo_data_extra_pending_with_clone_hint():
-    # climber-x clones an `input` data repo via a git_repo extra.
+def test_data_repo_pending_under_repo_not_extra():
+    # climber-x's `input` data repo is a data_packages package now, so an absent
+    # one is a pending *repo*, not an extra. (Its clone_policy is "prompt".)
     plan = install.build_plan("climber-x")
     checks = status.inspect(plan, Path("/nonexistent-root-xyz"))
+    repos = by_name(checks, "repo")
+    assert "climber-x-input" in repos
+    assert repos["climber-x-input"].state == "pending"
+    assert repos["climber-x-input"].hint == "configme install climber-x-input"
+    # And it is no longer reported as an extra.
     extras = by_name(checks, "extra")
-    pending = [c for c in extras.values() if c.state == "pending"
-               and c.category == "extra" and "git_repo" in c.name]
-    assert pending, "expected a pending git_repo data extra for climber-x"
-    assert any(c.hint.startswith("git clone") for c in pending)
+    assert not any("input" in name or "git_repo" in name for name in extras)
 
 
 # --------------------------------------------------------------- rendering

@@ -6,10 +6,10 @@ same way ``install`` does (the checkout's manifest names the primary ->
 ``build_plan`` -> ``root_for``) and probes the disk, reporting per-component
 state across four categories:
 
-  repo    each cloned component is a real git checkout
+  repo    each cloned component (incl. data_packages) is a real git checkout
   link    each inter-component build symlink resolves
   build   each declared ``[package.artifacts]`` file exists (per variant)
-  extra   each orchestrator extra (git_repo / data_link / runme_config) is present
+  extra   each orchestrator extra (data_link / runme_config) is present
 
 Generality comes from driving every check off the same registry metadata that
 drives ``install`` — not a separate hand-maintained checklist — so a new
@@ -189,19 +189,17 @@ def _inspect_builds(plan, root: Path, pkgs) -> List[Check]:
 
 
 def _inspect_extras(plan, root: Path) -> List[Check]:
-    """Each orchestrator extra is present on disk. ``git_repo`` (auxiliary/data
-    repos) and ``data_link``/``runme_config`` are probed; ``pip_package`` is
-    skipped because an installed pip package cannot be reliably probed from the
-    checkout."""
+    """Each orchestrator extra is present on disk. ``data_link``/``runme_config``
+    are probed; ``pip_package`` is skipped because an installed pip package
+    cannot be reliably probed from the checkout. (Auxiliary/data repos are not
+    extras — they are packages, probed by ``_inspect_repos``.)"""
     out: List[Check] = []
     orch = plan.orchestrator
     if orch is None or not orch.extras:
         return out
     install_hint = f"configme install {orch.name}"
     for name, value in orch.extras.items():
-        if name == "git_repo":
-            out += _inspect_git_repos(value, root)
-        elif name == "data_link":
+        if name == "data_link":
             for label in (value if isinstance(value, list) else [value]):
                 link_path = root / label
                 if link_path.is_symlink() or link_path.exists():
@@ -221,35 +219,6 @@ def _inspect_extras(plan, root: Path) -> List[Check]:
                     out.append(Check("extra", "runme_config", "pending",
                                      detail=".runme/config.toml not created",
                                      hint=install_hint))
-    return out
-
-
-def _inspect_git_repos(value, root: Path) -> List[Check]:
-    """Probe each ``git_repo`` extra (e.g. climber-x's ``input`` data repo). A
-    present dir is ``ok``; an absent one is ``pending`` with the exact clone
-    command as the hint — these are the data repos a user may have skipped."""
-    out: List[Check] = []
-    entries = value if isinstance(value, list) else [value]
-    for e in entries:
-        if not isinstance(e, dict):
-            continue
-        name, org, repo = e.get("dir"), e.get("org"), e.get("repo")
-        if not (name and org and repo):
-            continue
-        dest = root / name
-        if dest.exists() or dest.is_symlink():
-            out.append(Check("extra", f"git_repo {name}", _OK))
-            continue
-        # ``protocol`` may pin the transport for this repo; otherwise ssh (the
-        # install default). The exact clone command is the most actionable hint.
-        transport = e.get("protocol", "ssh")
-        url = install.build_clone_url(e.get("host", "github.com"), org, repo,
-                                      transport)
-        hint = f"git clone {url} {dest}"
-        if e.get("ref"):
-            hint += f" && (cd {dest} && git checkout {e['ref']})"
-        out.append(Check("extra", f"git_repo {name} (data)", "pending",
-                         detail="not cloned", hint=hint))
     return out
 
 
