@@ -179,23 +179,27 @@ commits is also rebuilt when it is a build-it package (e.g. `fesm-utils`), gated
 exactly like `install` — `--build-deps` rebuilds without asking, otherwise you
 are prompted. Add `--dry-run` to preview the pulls and reconfigures.
 
-After the managed components, the orchestrator's **extra repos** are refreshed
-too. These are the auxiliary checkouts declared as `git_repo` extras — for
-CLIMBER-X that is the large `input/` data repo on GitLab. Because they can be big
-and slow, each one is an opt-in `y/N` prompt (default **no**): a checkout that is
-already on disk is offered a `git pull`, a missing one is offered a fresh clone.
-The `pip_package`/`runme_config` extras (e.g. the `runme` tool) are offered a
-re-run the same way. To refresh everything without prompting, pass `-y` — it
-answers yes to *every* prompt in the run (ref switches, rebuilds, and the
-default-no extra-repo pulls), so `configme upgrade -y` is fully unattended.
+The orchestrator's **data repos** are refreshed alongside the components. These
+are auxiliary, clone-only checkouts — for CLIMBER-X, the large `input/` data repo
+on GitLab — declared in the orchestrator's `data_packages` list. Upgrade pulls
+one that is already on disk, but **never clones** a missing one: upgrade only
+ever refreshes what you already have. If a data repo (or an optional private
+component) was never installed, the run ends with a **reminder** naming it and
+the `configme install` command to fetch it — so the big `input` repo is surfaced
+without forcing a multi-GB download.
+
+The `pip_package`/`runme_config` post-config extras (e.g. the `runme` tool) are
+offered a re-run, each a `y/N` prompt (default **no**). To run the whole upgrade
+unattended, pass `-y` — it answers yes to *every* prompt (ref switches, rebuilds,
+data-repo pulls), so `configme upgrade -y` needs no input.
 
 To touch only specific checkouts, use `--repos` with a comma-separated list of
-names — managed components and/or extra repos (by their dir):
+names — components and/or data repos (by their package name):
 
 ```bash
-configme upgrade -y                     # pull/refresh everything, no prompts
-configme upgrade --repos input          # only the input data repo
-configme upgrade --repos yelmo,input    # just these two checkouts
+configme upgrade -y                            # pull/refresh everything, no prompts
+configme upgrade --repos climber-x-input       # only the input data repo
+configme upgrade --repos yelmo,climber-x-input # just these two checkouts
 ```
 
 ### Check what is still pending
