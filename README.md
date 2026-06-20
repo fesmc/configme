@@ -179,6 +179,25 @@ commits is also rebuilt when it is a build-it package (e.g. `fesm-utils`), gated
 exactly like `install` — `--build-deps` rebuilds without asking, otherwise you
 are prompted. Add `--dry-run` to preview the pulls and reconfigures.
 
+After the managed components, the orchestrator's **extra repos** are refreshed
+too. These are the auxiliary checkouts declared as `git_repo` extras — for
+CLIMBER-X that is the large `input/` data repo on GitLab. Because they can be big
+and slow, each one is an opt-in `y/N` prompt (default **no**): a checkout that is
+already on disk is offered a `git pull`, a missing one is offered a fresh clone.
+The `pip_package`/`runme_config` extras (e.g. the `runme` tool) are offered a
+re-run the same way. To refresh everything without prompting, pass `-y` — it
+answers yes to *every* prompt in the run (ref switches, rebuilds, and the
+default-no extra-repo pulls), so `configme upgrade -y` is fully unattended.
+
+To touch only specific checkouts, use `--repos` with a comma-separated list of
+names — managed components and/or extra repos (by their dir):
+
+```bash
+configme upgrade -y                     # pull/refresh everything, no prompts
+configme upgrade --repos input          # only the input data repo
+configme upgrade --repos yelmo,input    # just these two checkouts
+```
+
 ### Check what is still pending
 
 `configme status` is a **read-only** report of what is actually on disk versus

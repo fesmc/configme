@@ -94,7 +94,8 @@ def pip_tool_satisfied(name: str, ref: Optional[str]) -> bool:
 
 
 def _pip_package(value, runner, root: Path, cfg: dict, ask,
-                 confirm=None, followups=None, machine: Optional[str] = None) -> str:
+                 confirm=None, followups=None, machine: Optional[str] = None,
+                 upgrade: bool = False, repos=None) -> str:
     # Imported lazily to avoid an install <-> extras import cycle.
     from configme.data import split_ref
 
@@ -111,6 +112,13 @@ def _pip_package(value, runner, root: Path, cfg: dict, ask,
             runner.emit(f"# pip_package {name}: {ref} already installed; skipping")
             print(f"  pip_package {name}: {ref} already installed; skipping")
             status.append(f"{name}=present")
+            continue
+        # On `upgrade`, treat the tool like every other extra: opt-in per package
+        # (default no; `-y` forces). Install always runs it unconditionally.
+        if upgrade and confirm is not None and not confirm(
+                f"Update pip package {name} (pip install -U)?", False):
+            print(f"  - pip_package {name}: skipped")
+            status.append(f"{name}=skipped")
             continue
         # `-U` so an unpinned tool tracks latest and a pinned-but-mismatched one
         # is replaced; the `@ref` in the URL fixes exactly what gets fetched.
@@ -130,9 +138,16 @@ def _pip_package(value, runner, root: Path, cfg: dict, ask,
 
 
 def _runme_config(value, runner, root: Path, cfg: dict, ask,
-                  confirm=None, followups=None, machine: Optional[str] = None) -> str:
+                  confirm=None, followups=None, machine: Optional[str] = None,
+                  upgrade: bool = False, repos=None) -> str:
     if not value:
         return ""
+    # On `upgrade`, gate re-running like any other extra (default no; `-y`
+    # forces). Install seeds .runme/config.toml unconditionally.
+    if upgrade and confirm is not None and not confirm(
+            "Re-run runme config (.runme/config.toml)?", False):
+        print("  - runme_config: skipped")
+        return "skipped"
     dst = root / ".runme" / "config.toml"
     # The runme ``hpc`` is the machine name; default it to the machine this
     # install/config already resolved, so it need not be retyped when correct.
@@ -187,7 +202,8 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
 
 
 def _data_link(value, runner, root: Path, cfg: dict, ask,
-               confirm=None, followups=None, machine: Optional[str] = None) -> str:
+               confirm=None, followups=None, machine: Optional[str] = None,
+               upgrade: bool = False, repos=None) -> str:
     labels = value if isinstance(value, list) else [value]
     done = []
     for label in labels:
@@ -238,22 +254,34 @@ def _data_link(value, runner, root: Path, cfg: dict, ask,
 
 
 def _git_repo(value, runner, root: Path, cfg: dict, ask,
-              confirm=None, followups=None, machine: Optional[str] = None) -> str:
-    """Clone one or more auxiliary git repos into named dirs under the
-    orchestrator root — e.g. climber-x's ``input`` from GitLab. Each entry is a
-    table ``{dir, org, repo, host?, ref?, protocol?}``; ``host`` defaults to
-    GitHub and ``ref`` (branch/tag/commit) is checked out after cloning.
+              confirm=None, followups=None, machine: Optional[str] = None,
+              upgrade: bool = False, repos=None) -> str:
+    """Clone (or, on ``upgrade``, refresh) one or more auxiliary git repos into
+    named dirs under the orchestrator root — e.g. climber-x's ``input`` from
+    GitLab. Each entry is a table ``{dir, org, repo, host?, ref?, protocol?}``;
+    ``host`` defaults to GitHub and ``ref`` (branch/tag/commit) is checked out
+    after cloning.
 
     Honors the install download mode: ``ssh``/``https`` pick the clone
     transport, ``no`` uses whatever is already on disk. A per-entry
     ``protocol`` (``"https"``/``"ssh"``) overrides the transport for that repo
     (handy when a host only has HTTPS login configured); ``-d no`` is never
-    overridden. An existing dir is left untouched (idempotent re-runs).
+    overridden.
 
-    These repos can be large/slow, so before each fresh clone the user is asked
-    (``confirm``, default **no**); declining defers it — the clone command is
-    printed and appended to ``followups`` so it surfaces in the install summary.
-    Non-interactive runs take the default (skip)."""
+    Each entry is gated by ``confirm`` (default **no**; ``configme upgrade -y``
+    forces yes) because these repos can be large/slow:
+
+    * **install** (``upgrade=False``) — a *missing* dir is offered as a fresh
+      clone; declining defers it (the clone command is printed and appended to
+      ``followups`` for the summary). An existing dir is left untouched
+      (idempotent re-runs).
+    * **upgrade** (``upgrade=True``) — a *present* dir is offered a
+      ``git pull --ff-only`` in place (the install path never refreshes these);
+      a *missing* dir is offered a fresh clone, exactly as on install.
+
+    ``repos`` (when not None) narrows the run to entries whose ``dir`` is in the
+    set — this is how ``configme upgrade --repos input`` selects exactly which
+    auxiliary repos to touch. Non-interactive runs take the default (skip)."""
     # Imported lazily to avoid an install <-> extras import cycle.
     from configme.install import build_clone_url
 
@@ -272,7 +300,11 @@ def _git_repo(value, runner, root: Path, cfg: dict, ask,
             print(f"  ! git_repo: entry missing dir/org/repo: {e}; skipping")
             done.append("?=invalid")
             continue
+        # `--repos` filter (upgrade): touch only the named auxiliary repos.
+        if repos is not None and name not in repos:
+            continue
         dest = root / name
+        exists = dest.exists() or dest.is_symlink()
         # An entry may pin its clone transport with `protocol = "https"` / "ssh"
         # (e.g. a repo on a host where only HTTPS login is set up), overriding
         # the install download mode. `-d no` (use existing) is never overridden.
@@ -281,24 +313,46 @@ def _git_repo(value, runner, root: Path, cfg: dict, ask,
         if protocol and transport != "no":
             transport = protocol
         url = build_clone_url(host, org, repo, transport)
-        runner.emit(f"git clone {url} {dest}")
-        if ref:
-            runner.emit(f"(cd {dest} && git checkout {ref})")
 
+        # `-d no`: never fetch anything; just report what is (or isn't) on disk.
         if runner.download == "no":
-            if dest.exists() or dest.is_symlink():
+            runner.emit(f"# git_repo {name}: -d no; using existing {dest}")
+            if exists:
                 print(f"  git_repo {name}: -d no; using existing {dest}")
                 done.append(f"{name}=present")
             else:
                 print(f"  ! git_repo {name}: -d no but {dest} missing; pending")
                 done.append(f"{name}=pending")
             continue
+
+        # On upgrade, a present dir is refreshed in place (a pull, not a clone);
+        # everywhere else (install, or a missing dir) the action is a clone.
+        if upgrade and exists:
+            if confirm is not None and not confirm(
+                    f"Pull latest into {name}? ({dest})", False):
+                runner.emit(f"# git_repo {name}: {dest} exists; pull declined")
+                print(f"  - git_repo {name}: skipped pull of {dest}")
+                done.append(f"{name}=skipped")
+                continue
+            try:
+                status, _ = runner.pull_dir(name, dest)
+            except Exception as exc:  # InstallError on a non-ff / diverged tree
+                print(f"  ! git_repo {name}: pull failed: {exc}")
+                done.append(f"{name}=failed")
+                continue
+            print(f"  git_repo {name}: pull {status}")
+            done.append(f"{name}={status}")
+            continue
+
+        runner.emit(f"git clone {url} {dest}")
+        if ref:
+            runner.emit(f"(cd {dest} && git checkout {ref})")
         if runner.dry_run:
             print(f"  git_repo {name}: (dry) clone {url} -> {dest}"
                   f"{f' @ {ref}' if ref else ''}")
             done.append(f"{name}=dry")
             continue
-        if dest.exists() or dest.is_symlink():
+        if exists:
             print(f"  git_repo {name}: {dest} exists; skipping")
             done.append(f"{name}=exists")
             continue
@@ -336,14 +390,28 @@ _HANDLERS: dict = {
 }
 
 
+# Extras that manage a git checkout addressable by a repo name (its ``dir``).
+# Only these are eligible when ``configme upgrade --repos`` narrows the run to a
+# named subset — the others (pip tools, runme config, data links) are not repos.
+_REPO_EXTRAS = frozenset({"git_repo"})
+
+
 def run_extras(orchestrator, runner, root: Path, cfg: dict,
-               ask: _Ask, confirm=None, machine: Optional[str] = None) -> list:
+               ask: _Ask, confirm=None, machine: Optional[str] = None,
+               upgrade: bool = False, repos=None) -> list:
     """Run the orchestrator's typed extras. Returns a list of follow-up shell
     commands for steps the user deferred (e.g. a declined ``git_repo`` clone),
     so the caller can echo them in the install summary.
 
     ``machine`` is the machine name already resolved for this install/config;
-    handlers may use it as a default (e.g. ``runme_config``'s ``hpc``)."""
+    handlers may use it as a default (e.g. ``runme_config``'s ``hpc``).
+
+    ``upgrade`` switches the handlers to ``configme upgrade`` semantics: every
+    extra becomes opt-in per item (``confirm``, default no; ``-y`` forces yes),
+    and ``git_repo`` refreshes a present checkout with ``git pull`` rather than
+    skipping it. ``repos`` (when not None) narrows the run to that named set of
+    repos — only repo-managing extras (see ``_REPO_EXTRAS``) run, and each is
+    further filtered to the matching ``dir`` entries."""
     followups: list = []
     extras = orchestrator.extras or {}
     if not extras:
@@ -355,5 +423,9 @@ def run_extras(orchestrator, runner, root: Path, cfg: dict,
         if handler is None:
             print(f"  ! unknown extra '{name}' (skipping)")
             continue
-        handler(value, runner, root, cfg, ask, confirm, followups, machine=machine)
+        # `--repos` selects specific repos: non-repo extras have no place in it.
+        if repos is not None and name not in _REPO_EXTRAS:
+            continue
+        handler(value, runner, root, cfg, ask, confirm, followups,
+                machine=machine, upgrade=upgrade, repos=repos)
     return followups

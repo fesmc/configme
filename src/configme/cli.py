@@ -628,8 +628,17 @@ def cmd_git(args: argparse.Namespace) -> int:
 def cmd_upgrade(args: argparse.Namespace) -> int:
     """`configme upgrade [target]` — git pull existing checkouts + reconfigure
     with the same machine/compiler as before. With no target, upgrades the
-    current checkout's primary (orchestrator or package) + its deps."""
+    current checkout's primary (orchestrator or package) + its deps.
+
+    ``-y/--yes`` answers every prompt yes, so the whole upgrade runs
+    unattended — including the orchestrator's extra repos (e.g. climber-x's
+    ``input``), whose pull/clone prompts default to no. ``--repos a,b`` narrows
+    the run to a named subset of checkouts (components and/or extra repos)."""
     target = args.target or _bare_target(Path.cwd())
+    # -y forces every confirmation (ref switches, builds, and the default-no
+    # extra-repo pulls/clones) without prompting; otherwise prompt interactively.
+    confirm_fn = (lambda question, default=True: True) if args.yes else _confirm
+    repos = [r.strip() for r in args.repos.split(",") if r.strip()] if args.repos else None
     return install.run_upgrade(
         target,
         install_dir=args.install_dir,
@@ -639,8 +648,10 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         only=args.only,
         link_args=args.link or [],
+        repos=repos,
         select_fn=_select,
-        confirm_fn=_confirm,
+        confirm_fn=confirm_fn,
+        ask_fn=_ask,
     )
 
 
@@ -770,6 +781,16 @@ def _build_parser() -> argparse.ArgumentParser:
                            "an orchestrator to its subpackages or pull deps")
     p_upgrade.add_argument("--build-deps", action="store_true",
                            help="rebuild updated packages without prompting")
+    p_upgrade.add_argument(
+        "-y", "--yes", action="store_true",
+        help="answer yes to every prompt — run the whole upgrade unattended, "
+        "including the orchestrator's extra repos (e.g. climber-x's `input`), "
+        "whose pull/clone prompts otherwise default to no.")
+    p_upgrade.add_argument(
+        "--repos", metavar="A,B", default=None,
+        help="comma-separated subset of checkouts to upgrade — managed "
+        "components and/or the orchestrator's extra repos (by dir, e.g. "
+        "`input`). Everything else is left untouched.")
     p_upgrade.add_argument(
         "--link", action="append", metavar="PKG=PATH", default=None,
         help="(re)point an existing on-disk checkout of PKG at a different "
