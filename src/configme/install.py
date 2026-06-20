@@ -898,6 +898,14 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
         if not dry_run and not node_root.exists():
             continue
         for link in node.links:
+            # A nested dependency (``nest = true``) is *cloned inside* this
+            # package's checkout at ``link.path`` (see ``_apply_nesting``), so
+            # ``dest_of`` resolves it to exactly ``node_root / link.path`` —
+            # the link path itself. Emitting a symlink here would produce a
+            # pointless self-referential ``ln -s <path> <path>``. The directory
+            # already lives where it belongs, so there is nothing to link.
+            if link.nest:
+                continue
             dep_dest = present_dirs.get(link.dep)
             if dep_dest is None and link.dep in pkgs_all:
                 sub = (plan.orchestrator.component_paths.get(

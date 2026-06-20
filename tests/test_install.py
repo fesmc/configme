@@ -255,6 +255,25 @@ def test_nest_link_resolves_via_orchestrator_when_consumer_absent_from_plan():
     assert fh == Path("/r/yelmo/FastHydrology")
 
 
+def test_nest_link_emits_no_self_referential_symlink(tmp_path, capsys):
+    # A `nest = true` link clones the dependency *inside* its consumer's
+    # checkout (yelmo/FastHydrology), so the link phase must NOT also emit a
+    # symlink for it — `dest_of` resolves the dep to the link path itself, so a
+    # link would be the pointless self-loop `ln -s FastHydrology yelmo/FastHydrology`.
+    rc = install.run_install(
+        "yelmox", download="ssh", install_dir=str(tmp_path),
+        machine="macbook", compiler="gfortran",
+        overwrite=False, build_deps=False, dry_run=True, only=False,
+        link_args=None, select_fn=None, ask_fn=None, confirm_fn=lambda q, d: d,
+    )
+    assert rc == 0
+    script = capsys.readouterr().out
+    # The pointless self-link must be absent...
+    assert f"ln -s FastHydrology {tmp_path}/yelmo/FastHydrology" not in script
+    # ...while FastHydrology's own (legitimate) fesm-utils link is still emitted.
+    assert f"{tmp_path}/yelmo/FastHydrology/fesm-utils" in script
+
+
 def test_general_nesting_invariant_no_node_precedes_its_container():
     # The reorder is a general rule: for every orchestrator, a node nested inside
     # another node's checkout must be ordered after it.
