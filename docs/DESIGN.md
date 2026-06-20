@@ -227,17 +227,19 @@ checkout, not of any run. It reconstructs the same `build_plan` and probes the
 disk, then reports per-component state across four categories:
 
 - **repo** — each cloned component is a real git checkout (`.git` present).
-  Optional components (e.g. climber-x's `bgc`/`vilma`) that are absent are
-  `pending`, not `missing`.
+  An intentionally-absent repo — an `optional` component (`bgc`/`vilma`) or a
+  `prompt`/data repo not yet fetched (climber-x's `input`) — is `pending`, not
+  `missing`.
 - **link** — each inter-component build symlink resolves (`ok` / `broken` for a
   dangling link / `missing` when the dep is on disk but unlinked / `pending`
   when the dep itself is absent), reusing `install`'s link resolution.
 - **build** — each declared `[package.artifacts]` file exists, per variant. All
   present is `ok`, none is `pending` (not built — possibly deferred on purpose),
   some is `partial` (a genuinely half-finished build).
-- **extra** — each orchestrator extra is present: a `git_repo` (e.g. the
-  climber-x `input` data repo), a `data_link`, a `runme_config`. `pip_package`
-  is skipped (an installed pip package cannot be reliably probed from disk).
+- **extra** — each orchestrator extra is present: a `data_link` or a
+  `runme_config`. `pip_package` is skipped (an installed pip package cannot be
+  reliably probed from disk). Auxiliary/data repos are no longer extras — they
+  are packages, reported under **repo** above (§9).
 
 The probe is **pure** — no clone, configure, link, build, prompt, or config
 write — and is driven entirely off the registry metadata that already drives
@@ -263,6 +265,26 @@ deferred), so a re-run on a finished checkout neither prompts unnecessarily nor
 mislabels a built package as pending. `--build-deps` still forces a rebuild, and
 `upgrade` ignores the existing artifacts (it only builds after a pull that
 advanced HEAD, so they are stale by definition).
+
+### `configme upgrade [<target>]`
+
+Refreshes an existing install: `git pull --ff-only` each present checkout on its
+current branch, then reconfigure (rebuilding only what a pull advanced). It
+**never clones** — a checkout that is missing, dirty, or diverged is skipped and
+left to the user. After the components it refreshes the orchestrator's
+`data_packages` (a present data repo like climber-x's `input` is pulled in
+place) and re-runs the action extras; each is an opt-in Y/n defaulting to
+**no**, `-y` forces every prompt so the whole run is unattended, and
+`--repos a,b` narrows the run to a named subset of checkouts (components and/or
+data repos).
+
+Because upgrade never clones, a `data`/`optional`/`prompt` package that was
+never installed stays absent. Rather than silently skip it, upgrade ends with a
+**reminder** that lists each such never-installed package and the command to
+fetch it (`configme install <orchestrator>`). So a user who has not yet pulled
+the large `input` data repo is reminded it exists and how to get it — without
+upgrade forcing a multi-GB download. Cloning a missing data repo is always an
+`install` action, never an `upgrade` one.
 
 ---
 
@@ -441,21 +463,39 @@ concerns:
   - `configme/data/packages/*.toml` — per supported package: upstream
     org/repo, clone dir name, config style (`makefile-template` |
     `build.py`), inter-package link dependencies.
-  - `configme/data/orchestrators/*.toml` — per orchestrator: default package
-    set + declared extras (§13). Same shape as a `.configme/manifest.toml`. A
-    `default_packages` entry may pin a git ref as `name:ref` (branch/tag/commit),
-    e.g. climber-x's `yelmo:climber-x`; the ref is checked out after cloning.
+  - `configme/data/orchestrators/*.toml` — per orchestrator: its package set +
+    declared extras (§12). Same shape as a `.configme/manifest.toml`. Components
+    are named in three lists, all sharing the `name:ref` ref-pin syntax
+    (branch/tag/commit, e.g. climber-x's `yelmo:climber-x`, checked out after
+    cloning):
+    - `default_packages` — build components, dependency-resolved and ordered.
+    - `optional_packages` — components *attempted* on install but allowed to
+      fail softly (private repos a user may lack access to — climber-x's
+      `bgc`/`vilma`); a clone failure is recorded as "unavailable", not fatal,
+      and subsequent steps skip the absent checkout.
+    - `data_packages` — clone-only **auxiliary/data repos** (e.g. climber-x's
+      `input` data on GitLab) that sit *outside* the build graph: not
+      dependency-resolved, never built, only cloned / pulled / probed. They are
+      ordinary packages (`config_style = "none"`) referenced here so a repo's
+      traits travel with the repo instead of being inlined per orchestrator.
     An optional `host` (on a package or orchestrator) selects a non-GitHub git
-    host. An `optional_packages` list names components that are *attempted* on
-    install but allowed to fail softly (private repos a given user may lack
-    access to — climber-x's `bgc`/`vilma`): a clone failure is recorded as
-    "unavailable" in the summary, not a hard failure, and subsequent steps skip
-    the absent checkout.
-  - Per-package flags of note: `optional` (soft clone failure, as above),
-    `submodules` (run `git submodule update --init --recursive` after clone,
-    e.g. bgc's M4AGO), and `config_style = "none"` for a clone-only component
-    that configme places but does not configure or build (it is compiled by the
-    orchestrator, or ships a prebuilt library — e.g. vilma).
+    host.
+  - Per-package flags of note:
+    - `clone_policy` — how the repo's *absence* is treated: `required` (default;
+      cloned on install, a clone failure is fatal), `optional` (attempted, a
+      clone failure is a soft "unavailable" — private repos like `bgc`/`vilma`),
+      or `prompt` (not cloned by default; install asks first, default **no**, a
+      decline deferred — large/expensive repos like the GitLab `input` data).
+      Legacy `optional = true` is accepted as an alias for
+      `clone_policy = "optional"`.
+    - `protocol` — per-repo clone transport (`"https"`/`"ssh"`) overriding the
+      run's download mode (e.g. a host where only HTTPS login is configured);
+      `-d no` is never overridden.
+    - `submodules` — run `git submodule update --init --recursive` after clone
+      (e.g. bgc's M4AGO).
+    - `config_style = "none"` — a clone-only repo configme places but does not
+      configure or build (compiled by the orchestrator, ships a prebuilt
+      library, or is pure data — e.g. vilma, climber-x's input).
 - Onboarding a new package or orchestrator is a **data edit** (a natural PR
   target); the CLI logic stays generic and small.
 
@@ -538,15 +578,15 @@ Initial types (those yelmox needs today):
 - `data_link` — link runtime data (e.g. `ice_data`, `isostasy_data`). An
   existing link (or real dir) is kept untouched and not re-prompted; only a
   missing one is asked for, so re-running on a configured tree is quiet.
-- `git_repo` — clone an auxiliary repo (any git host) into a named dir, e.g.
-  climber-x's `input` from GitLab. Each entry is `{dir, org, repo, host?, ref?,
-  protocol?}`; `host` defaults to GitHub, `ref` is checked out after cloning,
-  and the install download mode (ssh/https/no) is honored. A per-entry
-  `protocol` (`"https"`/`"ssh"`) pins the transport for that repo (overriding
-  the download mode, e.g. a host where only HTTPS login is configured); `-d no`
-  is never overridden. Because these repos can be large, each fresh clone is
-  confirmed first (default **skip**); a declined clone is deferred and its
-  command echoed in the install summary.
+
+Extras are *actions*, not repositories. An auxiliary/data repository (e.g.
+climber-x's `input` from GitLab) is **not** an extra — it is a first-class
+clone-only package referenced via an orchestrator's `data_packages` list (§9).
+Modelling it as a package means the clone / pull / status / `--repos` pipeline
+that already serves components serves it too, and the repo's traits (host,
+`protocol`, `clone_policy`, ref) live with the repo instead of being inlined per
+orchestrator. (An earlier design carried such repos as a `git_repo` extra; that
+is superseded by the data-package model.)
 
 User/machine-specific values (data paths, hpc/account) are prompted or read
 from `.configme/config.toml` — never shipped. climber-x reuses whichever apply
