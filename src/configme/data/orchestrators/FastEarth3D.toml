@@ -1,0 +1,23 @@
+# FastEarth3D orchestrator (alex-robinson/FastEarth3D).
+#
+# Open-source 3D solid-Earth model (viscoelastic + sea-level equation). It builds
+# with its OWN hand-written Makefile (config/Makefile + config/common.mk +
+# config/Makefile_fastearth.mk), so configme does not generate or own its build:
+# config_style = "none". configme's job here is to manage the single component
+# dependency — fesm-utils — and pin it to the branch FastEarth3D requires.
+#
+# fe_remap (conservative lon-lat -> Gauss remapping) uses the `coords` module,
+# which lives on the fesm-utils `coords-dev` branch; the `:coords-dev` ref below
+# pins it (overridable per checkout via .configme/manifest.toml deps).
+
+[orchestrator]
+name = "FastEarth3D"
+org = "alex-robinson"
+repo = "FastEarth3D"
+dir = "FastEarth3D"
+config_style = "none"
+
+# fesm-utils, pinned to coords-dev (provides the `coords` module fe_remap needs).
+# Cloned at the FastEarth3D root as fesm-utils/ (the package's default dir), which
+# is exactly where config/common.mk expects the symlink/checkout.
+default_packages = ["fesm-utils:coords-dev"]
