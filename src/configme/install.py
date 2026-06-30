@@ -130,10 +130,15 @@ def resolve_repo_selectors(entries: List[str],
     return selected
 
 
-def _node_for(name: str) -> Node:
+def _node_for(name: str, *, prefer_package: bool = False) -> Node:
     orchs = data.orchestrators()
     pkgs = data.packages()
-    if name in orchs:
+    # A name can be registered as *both* an orchestrator and a component package
+    # (e.g. FastEarth3D — standalone orchestrator, yet also a climber-x
+    # component). The bare target resolves to the orchestrator; ``prefer_package``
+    # picks the package form for the component position (orchestrator expansion,
+    # or the non-primary slots of a ``+``-literal).
+    if name in orchs and not (prefer_package and name in pkgs):
         o = orchs[name]
         return Node(o.name, o.org, o.repo, o.dir, o.config_style, "", [], True,
                     host=o.host)
@@ -275,8 +280,12 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
 
     if "+" in target:
         names = [t for t in target.split("+") if t]
-        nodes = [_node_for(n) for n in names]
-        primary = next((n for n in nodes if n.is_orchestrator), nodes[0])
+        # The primary is the (first) orchestrator in the list; every other slot
+        # resolves as a package so a dual-registered name (orchestrator + package,
+        # e.g. FastEarth3D) installs as a component, not a nested orchestrator.
+        primary_name = next((n for n in names if n in orchs), names[0])
+        nodes = [_node_for(n, prefer_package=(n != primary_name)) for n in names]
+        primary = next(n for n in nodes if n.name == primary_name)
         orch = orchs.get(primary.name) if primary.is_orchestrator else None
         expanded = _with_subpackages(nodes)
         _apply_component_refs(expanded, orch)
@@ -304,10 +313,12 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         for comp in orch.optional_packages:
             _resolve_deps(comp, pkgs, opt_order)
         opt_only = [n for n in opt_order if n not in order]
-        comp_nodes = [_node_for(n) for n in order]
+        # Components resolve as packages: a dual-registered name (e.g.
+        # FastEarth3D, also a standalone orchestrator) clones as a component.
+        comp_nodes = [_node_for(n, prefer_package=True) for n in order]
         opt_names = set(orch.optional_packages)
         for n in opt_only:
-            node = _node_for(n)
+            node = _node_for(n, prefer_package=True)
             if n in opt_names:
                 node.clone_policy = "optional"
             comp_nodes.append(node)
@@ -315,7 +326,7 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         # `_resolve_deps` (they pull in nothing) and they keep their own
         # clone_policy (e.g. "prompt" for a large data repo). They ride the
         # normal node pipeline so pull/status/--repos cover them for free.
-        data_nodes = [_node_for(n) for n in orch.data_packages]
+        data_nodes = [_node_for(n, prefer_package=True) for n in orch.data_packages]
         nodes = comp_nodes + data_nodes + [primary]
         expanded = _with_subpackages(nodes)
         _apply_component_refs(expanded, orch)
@@ -809,8 +820,12 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     # orchestrator instead, so it shares the deps the orchestrator already
     # provides. Skipped when the user has already been explicit about scope
     # (`--only`, `--dir`, or a `+`-literal target).
+    # The target may itself be a standalone orchestrator that the host also
+    # manages as a component (e.g. FastEarth3D inside climber-x): the same prompt
+    # applies, so the gate does not exclude orchestrator primaries —
+    # `_host_orchestrator_for` already returns None when the target *is* the host.
     if (not only and "+" not in target and install_dir is None
-            and not plan.primary.is_orchestrator and confirm_fn is not None):
+            and confirm_fn is not None):
         host = _host_orchestrator_for(plan.primary.name, cwd)
         if host is not None:
             question = (

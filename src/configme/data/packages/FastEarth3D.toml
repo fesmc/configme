@@ -1,0 +1,22 @@
+# FastEarth3D as a *component* package (alex-robinson/FastEarth3D).
+#
+# FastEarth3D is also a standalone orchestrator (orchestrators/FastEarth3D.toml).
+# This package definition is what lets it be installed *inside* another
+# orchestrator (climber-x) as a component, sharing that orchestrator's deps
+# instead of cloning its own. `_node_for(..., prefer_package=True)` selects this
+# form when FastEarth3D appears in an orchestrator's component set; the bare
+# `configme install FastEarth3D` still resolves the orchestrator.
+#
+# As a component it shares the host orchestrator's fesm-utils (linked, not
+# re-cloned) — unlike the standalone orchestrator, which pins fesm-utils to
+# coords-dev for fe_remap's `coords` module.
+
+[package]
+name = "FastEarth3D"
+org = "alex-robinson"
+repo = "FastEarth3D"
+dir = "FastEarth3D"
+config_style = "makefile-template"
+
+[[package.links]]
+dep = "fesm-utils"

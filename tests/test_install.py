@@ -542,6 +542,87 @@ def test_run_install_skips_prompt_with_install_dir(tmp_path, monkeypatch):
     assert asked == []
 
 
+# ------------------------------ dual-registered name (orchestrator + component)
+
+
+def test_node_for_prefers_orchestrator_then_package_for_dual_name():
+    # FastEarth3D is registered both ways. Bare resolution is the orchestrator;
+    # prefer_package selects the component package form.
+    assert install._node_for("FastEarth3D").is_orchestrator
+    assert not install._node_for("FastEarth3D", prefer_package=True).is_orchestrator
+
+
+def test_climberx_plan_includes_fastearth3d_as_component_not_orchestrator():
+    plan = install.build_plan("climber-x")
+    fe = next(n for n in plan.nodes if n.name == "FastEarth3D")
+    assert not fe.is_orchestrator and fe.clone   # own checkout, not a nested orch
+    # coordinates was retired from climber-x.
+    assert all(n.name != "coordinates" for n in plan.nodes)
+
+
+def test_plus_literal_resolves_dual_name_as_component():
+    # The replan target the prompt builds: climber-x is the primary orchestrator,
+    # FastEarth3D rides along as a component package (not a nested orchestrator).
+    plan = install.build_plan("climber-x+FastEarth3D")
+    assert plan.primary.name == "climber-x" and plan.primary.is_orchestrator
+    fe = next(n for n in plan.nodes if n.name == "FastEarth3D")
+    assert not fe.is_orchestrator
+
+
+def test_host_orchestrator_for_dual_name_inside_climberx(tmp_path):
+    _write_manifest(tmp_path, "climber-x")
+    host = install._host_orchestrator_for("FastEarth3D", tmp_path)
+    assert host is not None and host.name == "climber-x"
+
+
+def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypatch):
+    # Inside climber-x, `configme install FastEarth3D`: the target resolves as an
+    # orchestrator, but climber-x claims it as a component, so the prompt still
+    # fires and (on yes) replans to climber-x+FastEarth3D.
+    _write_manifest(tmp_path, "climber-x")
+    monkeypatch.chdir(tmp_path)
+    Bail = _stop_at_root_for(monkeypatch)
+    calls: list = []
+    _spy_build_plan(monkeypatch, calls)
+    asked: list = []
+
+    try:
+        install.run_install(
+            "FastEarth3D", download="ssh", install_dir=None,
+            machine="macbook", compiler="gfortran",
+            overwrite=False, build_deps=False, dry_run=True, only=False,
+            link_args=None, select_fn=None, ask_fn=None,
+            confirm_fn=lambda q, d: asked.append(q) or True,
+        )
+    except Bail:
+        pass
+
+    assert calls == ["FastEarth3D", "climber-x+FastEarth3D"]
+    assert asked and "climber-x" in asked[0] and "FastEarth3D" in asked[0]
+
+
+def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):
+    # Declining keeps FastEarth3D-as-orchestrator: its own standalone install.
+    _write_manifest(tmp_path, "climber-x")
+    monkeypatch.chdir(tmp_path)
+    Bail = _stop_at_root_for(monkeypatch)
+    calls: list = []
+    _spy_build_plan(monkeypatch, calls)
+
+    try:
+        install.run_install(
+            "FastEarth3D", download="ssh", install_dir=None,
+            machine="macbook", compiler="gfortran",
+            overwrite=False, build_deps=False, dry_run=True, only=False,
+            link_args=None, select_fn=None, ask_fn=None,
+            confirm_fn=lambda q, d: False,
+        )
+    except Bail:
+        pass
+
+    assert calls == ["FastEarth3D"]
+
+
 # --------------------------------------------------- per-repo protocol override
 
 def _bare_node(**over):

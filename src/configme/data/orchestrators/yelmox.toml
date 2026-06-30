@@ -14,7 +14,6 @@ config_style = "makefile-template"
 # The full default set installed by `configme install yelmox`, in build order.
 default_packages = [
     "fesm-utils",
-    "coordinates",
     "yelmo",
     "FastIsostasy",
     "FastHydrology",

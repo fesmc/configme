@@ -1,10 +1,10 @@
 # climber-x orchestrator (cxesmc/climber-x).
 #
 # Layout: like every other orchestrator, configme clones climber-x's external
-# component repos directly at the climber-x root (coordinates/, fesm-utils/,
-# yelmo/). This matches the modern config/common.mk shipped on the climber-x
-# side; the legacy flat config/<machine>_<compiler> files have been updated to
-# the same root paths so `config.py` and `configme` agree.
+# component repos directly at the climber-x root (fesm-utils/, yelmo/,
+# FastEarth3D/). This matches the modern config/common.mk shipped on the
+# climber-x side; the legacy flat config/<machine>_<compiler> files have been
+# updated to the same root paths so `config.py` and `configme` agree.
 #
 # yelmo is pinned to its `climber-x` branch via the `:climber-x` ref on the
 # component name below.
@@ -24,7 +24,7 @@ config_style = "makefile-template"
 # Managed components configme clones/configures/links, in build order. Each is
 # cloned at the climber-x root (its default package dir); `yelmo:climber-x`
 # pins the yelmo `climber-x` branch.
-default_packages = ["fesm-utils", "coordinates", "yelmo:climber-x"]
+default_packages = ["fesm-utils", "yelmo:climber-x", "FastEarth3D"]
 
 # Optional components (private repos): attempted on install, but a clone failure
 # (no access) is a soft skip recorded as "unavailable" — never a hard failure.

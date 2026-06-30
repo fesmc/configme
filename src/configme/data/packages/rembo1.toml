@@ -7,7 +7,8 @@ repo = "rembo1"
 dir = "rembo1"
 config_style = "makefile-template"
 
-# rembo1 links coordinates into its libs/ subdirectory (not the repo root).
+# rembo1's former `coordinates` dependency is gone — that functionality now lives
+# inside fesm-utils, which rembo1 links instead. (coordinates remains a supported
+# package for any consumer that still wants it standalone.)
 [[package.links]]
-dep = "coordinates"
-path = "libs/coordinates"
+dep = "fesm-utils"
