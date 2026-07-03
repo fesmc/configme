@@ -1,4 +1,4 @@
-# FastEarth3D orchestrator (alex-robinson/FastEarth3D).
+# FastEarth3D orchestrator (fesmc/FastEarth3D).
 #
 # Open-source 3D solid-Earth model (viscoelastic + sea-level equation). Its
 # config/Makefile is already configme-shaped — it carries the <COMPILER_CONFIGURATION>
@@ -15,7 +15,7 @@
 
 [orchestrator]
 name = "FastEarth3D"
-org = "alex-robinson"
+org = "fesmc"
 repo = "FastEarth3D"
 dir = "FastEarth3D"
 config_style = "makefile-template"

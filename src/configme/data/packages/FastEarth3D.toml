@@ -1,4 +1,4 @@
-# FastEarth3D as a *component* package (alex-robinson/FastEarth3D).
+# FastEarth3D as a *component* package (fesmc/FastEarth3D).
 #
 # FastEarth3D is also a standalone orchestrator (orchestrators/FastEarth3D.toml).
 # This package definition is what lets it be installed *inside* another
@@ -13,7 +13,7 @@
 
 [package]
 name = "FastEarth3D"
-org = "alex-robinson"
+org = "fesmc"
 repo = "FastEarth3D"
 dir = "FastEarth3D"
 config_style = "makefile-template"
