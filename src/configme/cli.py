@@ -12,6 +12,7 @@ Command surface (see docs/DESIGN.md sec. 4)::
     configme show <name>                   print a machine/compiler fragment to stdout
     configme new machine|compiler <name>   scaffold a fragment from an existing one
     configme netcdf                        detect & print NC_FROOT / NC_CROOT
+    configme check machine [<name>]        detect the CPU's -march, compare to a fragment
     configme init                          scaffold/validate a .configme/ folder
     configme list                          supported packages / machines / compilers
 
@@ -30,14 +31,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from configme import (__version__, context, data, extras, generate, install,
-                      netcdf, status)
+from configme import (__version__, context, cpu, data, extras, generate,
+                      install, netcdf, status)
 from configme import git as git_mod
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
 # configures the current orchestrator; name packages with `configme config`.
 VERBS = {"install", "update", "upgrade", "config", "show", "new", "netcdf",
-         "init", "list", "status", "git"}
+         "init", "list", "status", "git", "check"}
 
 # Standalone tools `configme install <name>` shortcuts to a `pip install -U` of,
 # rather than treating as a managed model package (no clone/configure/link/
@@ -474,6 +475,41 @@ def cmd_netcdf(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check(args: argparse.Namespace) -> int:
+    """`configme check machine [name]` — read-only: detect the ``-march`` the CPU
+    running this command wants and compare it against a machine fragment's pinned
+    flag. Detect-only: it never fails the build (exit 0 even on a mismatch), it
+    warns. With no name, the machine is auto-detected from the hostname/OS."""
+    project = context.find_project(Path.cwd())
+    name = args.name
+    auto = name is None
+    if auto:
+        name = context.hostname_machine() or context.platform_machine()
+    if name is None:
+        raise context.ProjectError(
+            "no machine given and none auto-detected from the hostname/OS; pass "
+            "a name (`configme check machine <name>`). Available machines: "
+            f"{', '.join(context.available_fragments('machine', project)) or '(none)'}")
+
+    path, tier, text = context.read_fragment("machine", name, project)
+    configured = cpu.march_of_fragment(text)
+    info = cpu.detect()
+    level, msg = cpu.compare(info.march, configured)
+
+    print(f"machine:    {name}{'  (auto-detected)' if auto else ''}")
+    if info.model:
+        print(f"cpu:        {info.model}")
+    det_desc = cpu.march_desc(info.march)
+    print(f"detected:   -march={info.march or '?'}   "
+          f"({info.source}{'; ' + det_desc if det_desc else ''})")
+    print(f"configured: -march={configured or '(none)'}   ({tier} tier: {path})")
+    tag = {"ok": "OK", "warn": "WARN", "info": "note"}[level]
+    print(f"status:     {tag} — {msg}")
+    print("note: reflects the node running this command; on an HPC login node, "
+          "run under srun/salloc for the compute-node CPU.")
+    return 0
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     cwd = Path.cwd()
     orchestrators = data.orchestrators()
@@ -679,6 +715,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p_netcdf.add_argument("-v", "--verbose", action="store_true",
                           help="also print INC_NC / LIB_NC and the detection source")
     p_netcdf.set_defaults(func=cmd_netcdf)
+
+    p_check = sub.add_parser(
+        "check", help="detect the CPU's -march and compare it against a "
+        "machine fragment (read-only, warns only)")
+    p_check.add_argument("what", choices=["machine"],
+                         help="what to check (currently only 'machine')")
+    p_check.add_argument(
+        "name", nargs="?", default=None,
+        help="machine name (default: auto-detected from the hostname/OS)")
+    p_check.set_defaults(func=cmd_check)
 
     p_init = sub.add_parser("init", help="scaffold/validate a .configme/ folder")
     p_init.set_defaults(func=cmd_init)

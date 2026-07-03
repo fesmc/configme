@@ -1,0 +1,55 @@
+# CPU microarchitecture data for `configme check machine`.
+#
+# [march.<flag>]  the -march tuning flags configme knows about. `rank` orders
+#   them from most conservative (low) to most aggressive (high) so the check can
+#   report whether a machine fragment's configured -march is more conservative
+#   than — or, riskier, newer than — the CPU actually running the build. `desc`
+#   is a human label.
+#
+# [[cpu]]  ordered model-name rules for the /proc/cpuinfo fallback path, used
+#   only when `gcc -march=native` is unavailable (gcc's own resolution is always
+#   preferred). `match` is a regular expression tested case-insensitively against
+#   the CPU model string; the first hit wins and maps to `uarch`. Add a row for a
+#   new CPU rather than touching code.
+
+[march.core-avx2]
+rank = 10
+desc = "Intel AVX2 (Haswell/Broadwell and later, generic)"
+
+[march.znver1]
+rank = 15
+desc = "AMD Zen 1 (EPYC 7xx1 Naples) — AVX2, no AVX-512"
+
+[march.znver2]
+rank = 20
+desc = "AMD Zen 2 (EPYC 7xx2 Rome) — AVX2, no AVX-512"
+
+[march.znver3]
+rank = 30
+desc = "AMD Zen 3 (EPYC 7xx3 Milan) — AVX2, no AVX-512"
+
+[march.sapphirerapids]
+rank = 40
+desc = "Intel Sapphire Rapids — AVX-512"
+
+[march.znver4]
+rank = 45
+desc = "AMD Zen 4 (EPYC 9xx4 Genoa) — AVX-512"
+
+# --- /proc/cpuinfo model-name fallback rules (first match wins) ---
+
+[[cpu]]
+match = 'EPYC\s+7\d{2}1'
+uarch = "znver1"
+
+[[cpu]]
+match = 'EPYC\s+7\d{2}2'
+uarch = "znver2"
+
+[[cpu]]
+match = 'EPYC\s+7\d{2}3'
+uarch = "znver3"
+
+[[cpu]]
+match = 'EPYC\s+9\d{2}4'
+uarch = "znver4"

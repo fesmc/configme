@@ -142,6 +142,7 @@ configme [-m M] [-c C]                # alias for `configme config` on the curre
 configme show <name>                   # print a machine/compiler fragment to stdout
 configme new machine|compiler <name>   # scaffold a fragment from an existing one
 configme netcdf                        # detect & print NC_FROOT / NC_CROOT
+configme check machine [<name>]        # detect the CPU's -march, compare to a fragment
 configme init                          # scaffold/validate a .configme/ folder
 configme list                          # supported packages / machines / compilers
 ```
@@ -373,6 +374,26 @@ default yes) and proceeds with it. An unknown *compiler* simply re-prompts with
 a hint to `configme new compiler` — the compiler set is small and fixed, so no
 auto-creation. During a fresh `install` (before the orchestrator is cloned)
 there is no project yet, so the escape valve writes only the user tier.
+
+### Verifying `-march`: `configme check machine`
+
+A machine fragment pins a CPU-specific `-march` (e.g. `awi_albedo` → `znver2`).
+`configme check machine [<name>]` is a read-only diagnostic that detects the
+`-march` the CPU *running the command* wants and compares it against the
+fragment's pinned flag:
+
+- **Detection** — `gcc -march=native -Q --help=target` resolves `native` to a
+  concrete uarch (authoritative); if gcc is absent it falls back to matching the
+  `/proc/cpuinfo` model name against the `[[cpu]]` rules in `data/uarch.toml`.
+- **Comparison** — ranks in `data/uarch.toml` order the flags, so a mismatch is
+  reported as either *more conservative than the CPU supports* (lost
+  performance) or *newer than the CPU* (illegal-instruction risk). Unknown flags
+  degrade to an un-ranked mismatch note rather than a false OK.
+- **Detect-only:** it always exits 0 — it warns, it does not fail a build. New
+  CPUs are added by editing `data/uarch.toml`, not code.
+- With no `<name>`, the machine is auto-detected from the hostname/OS. Detection
+  reflects whatever node runs the command, so on an HPC login node run it under
+  `srun`/`salloc` to see the compute-node CPU.
 
 ### Contribute-back nudge
 
