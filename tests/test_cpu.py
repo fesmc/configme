@@ -23,13 +23,26 @@ def test_march_from_model_unknown_is_none():
 
 # --------------------------------------------------------------- detect order
 
-def test_detect_prefers_gcc_native(monkeypatch):
-    monkeypatch.setattr(cpu, "_gcc_native_march", lambda cc="gcc": "znver3")
+def test_detect_uses_gcc_when_it_agrees(monkeypatch):
+    monkeypatch.setattr(cpu, "_gcc_native_march", lambda cc="gcc": "znver2")
     monkeypatch.setattr(cpu, "_cpu_model",
                         lambda: "AMD EPYC 7702 64-Core Processor")
     info = cpu.detect()
-    assert info.march == "znver3"          # gcc wins over the 7702->znver2 rule
+    assert info.march == "znver2"
     assert "native" in info.source
+    assert info.note is None
+
+
+def test_detect_prefers_model_when_gcc_underreports(monkeypatch):
+    # Levante regression: a Zen 3 EPYC 7763 under a pre-Zen3 gcc resolves
+    # -march=native to znver1. The 7763 model is the trustworthy signal.
+    monkeypatch.setattr(cpu, "_gcc_native_march", lambda cc="gcc": "znver1")
+    monkeypatch.setattr(cpu, "_cpu_model",
+                        lambda: "AMD EPYC 7763 64-Core Processor")
+    info = cpu.detect()
+    assert info.march == "znver3"
+    assert "cpuinfo" in info.source
+    assert info.note and "znver1" in info.note
 
 
 def test_detect_falls_back_to_model(monkeypatch):
@@ -74,6 +87,12 @@ def test_march_of_fragment():
 
 def test_march_of_fragment_none_when_unset():
     assert cpu.march_of_fragment("DFLAGS_NODEBUG = -O2 -fp-model precise\n") is None
+
+
+def test_march_of_fragment_ignores_comment_mentions():
+    frag = ("# the login gcc mis-resolves -march=native to znver1\n"
+            "DFLAGS_NODEBUG = -Ofast -march=znver3 -traceback\n")
+    assert cpu.march_of_fragment(frag) == "znver3"
 
 
 # --------------------------------------------------------------- comparison

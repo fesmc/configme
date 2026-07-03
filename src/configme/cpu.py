@@ -32,11 +32,13 @@ from configme import data
 class CpuInfo:
     """Detected CPU picture. ``march`` is the resolved tuning flag (e.g.
     ``znver3``) or None when nothing could be resolved; ``model`` is the raw CPU
-    model string when known; ``source`` names how ``march`` was obtained."""
+    model string when known; ``source`` names how ``march`` was obtained; ``note``
+    carries a caveat when the two backends disagreed (e.g. an old gcc)."""
 
     march: Optional[str]
     model: Optional[str]
     source: str
+    note: Optional[str] = None
 
 
 # ------------------------------------------------------------------ data table
@@ -123,26 +125,51 @@ def _march_from_model(model: Optional[str]) -> Optional[str]:
 
 
 def detect(cc: str = "gcc") -> CpuInfo:
-    """Detect the running CPU's ``-march``: gcc ``-march=native`` first, then the
-    ``/proc/cpuinfo`` model-name fallback. ``march`` is None when neither
-    resolves (e.g. an unrecognised model on a machine without gcc)."""
+    """Detect the running CPU's ``-march`` from both backends and return the
+    higher-ranked (more capable) result. gcc ``-march=native`` never *over*-reports
+    — an old gcc simply falls back to the newest uarch it knows (e.g. a Zen 3
+    EPYC 7763 resolves to ``znver1`` under a pre-Zen3 gcc) — so when the
+    ``/proc/cpuinfo`` model maps to a newer uarch, that model is trusted and the
+    gcc under-report is recorded in ``note``. ``march`` is None only when neither
+    backend resolves anything."""
     model = _cpu_model()
-    march = _gcc_native_march(cc)
-    if march:
-        return CpuInfo(march=march, model=model, source=f"{cc} -march=native")
-    march = _march_from_model(model)
-    if march:
-        return CpuInfo(march=march, model=model, source="/proc/cpuinfo model match")
-    return CpuInfo(march=None, model=model, source="undetected")
+    gcc_march = _gcc_native_march(cc)
+    model_march = _march_from_model(model)
+    ranks = march_ranks()
+
+    def _rank(m: Optional[str]) -> int:
+        return ranks.get(m, -1) if m else -2  # None sorts below any known flag
+
+    # Prefer the higher-ranked flag; on a tie or when only one resolved, keep it.
+    if _rank(model_march) > _rank(gcc_march):
+        march, source = model_march, "/proc/cpuinfo model match"
+    else:
+        march, source = gcc_march, f"{cc} -march=native"
+
+    if march is None:
+        return CpuInfo(march=None, model=model, source="undetected")
+
+    note = None
+    if gcc_march and model_march and _rank(model_march) > _rank(gcc_march):
+        note = (f"{cc} -march=native reports {gcc_march} (too old to name this "
+                f"CPU); using {model_march} from the CPU model instead.")
+    return CpuInfo(march=march, model=model, source=source, note=note)
 
 
 # ------------------------------------------------------------------ comparison
 
 def march_of_fragment(text: str) -> Optional[str]:
     """Extract the ``-march=<x>`` value from a machine fragment's flags, or None
-    when the fragment pins no ``-march`` (it inherits the compiler default)."""
-    m = re.search(r"-march=(\S+)", text)
-    return m.group(1) if m else None
+    when the fragment pins no ``-march`` (it inherits the compiler default).
+    Comment lines are skipped so a ``-march=native`` mentioned in a note is not
+    mistaken for the configured flag."""
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        m = re.search(r"-march=(\S+)", line)
+        if m:
+            return m.group(1)
+    return None
 
 
 def compare(detected: Optional[str], configured: Optional[str]) -> Tuple[str, str]:

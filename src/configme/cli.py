@@ -502,6 +502,8 @@ def cmd_check(args: argparse.Namespace) -> int:
     det_desc = cpu.march_desc(info.march)
     print(f"detected:   -march={info.march or '?'}   "
           f"({info.source}{'; ' + det_desc if det_desc else ''})")
+    if info.note:
+        print(f"            {info.note}")
     print(f"configured: -march={configured or '(none)'}   ({tier} tier: {path})")
     tag = {"ok": "OK", "warn": "WARN", "info": "note"}[level]
     print(f"status:     {tag} — {msg}")
