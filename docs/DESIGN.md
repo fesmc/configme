@@ -201,6 +201,25 @@ Selection semantics:
 already-cloned orchestrator/package, in which case it skips cloning that root
 and performs the remaining steps.
 
+**Step order (front-loaded prompts).** Everything that needs the user at the
+keyboard runs before the slow work, so an install can be started and left:
+
+1. **clone the primary** — cloned first so the checkout's own project-tier
+   `.configme/` (config defaults, machine/compiler fragments, a stored `hpc`
+   account) is available to the prompts below (§6). Target names are validated
+   before this by the plan builder.
+2. **selection** — resolve machine + compiler; for an orchestrator whose extras
+   seed `runme` (§12) also capture the `hpc` account here (`hpc` defaults to the
+   machine name), so `runme_config` reuses it without re-asking.
+3. **extras** — the orchestrator's typed actions (pip `runme`, `runme config`,
+   data links) run now, right after the primary exists — before the component
+   clones and the build — so their remaining prompts (data-link paths) are
+   front-loaded too.
+4. **component clones → manifest → links → configure + build** — the slow tail
+   (notably the fesm-utils `build.py`, §8) runs last and unattended. Shared
+   libraries (fesm-utils) are cloned before the inter-component links that point
+   at them.
+
 ### `configme config [<target>]` (config-only)
 
 Regenerates Makefile(s) from template + central machine/compiler + repo
@@ -563,9 +582,11 @@ cleanups such as `--overwrite` moves). Hand-editable, replayable.
 
 ## 11. Robustness
 
-- **Fail-fast validation** before any destructive/slow work: orchestrator and
-  packages supported, machine + compiler resolve to fragments, manifest
-  well-formed.
+- **Fail-fast validation** before the slow work (component clones + build):
+  orchestrator and packages supported and the manifest well-formed (checked up
+  front, before any clone); machine + compiler resolve to fragments (checked
+  right after the primary clone, so the checkout's project-tier fragments count
+  — see the install step order in §4).
 - **Atomic Makefile writes** (temp file + rename): an interrupted run never
   leaves a corrupt or half-written `Makefile`.
 - **Idempotent re-runs:** existing clones skipped, Makefiles regenerated,
@@ -585,9 +606,13 @@ cleanups such as `--overwrite` moves). Hand-editable, replayable.
 
 ## 12. Orchestrator extras (typed)
 
-Post-config steps beyond clone/configure/link are modelled as a **small, closed
-vocabulary of typed extras** with built-in handlers, declared per orchestrator
-in its TOML — **not** as arbitrary shell hooks.
+Orchestrator-level steps beyond clone/configure/link are modelled as a **small,
+closed vocabulary of typed extras** with built-in handlers, declared per
+orchestrator in its TOML — **not** as arbitrary shell hooks. On `install` they
+run early — right after the primary clone and selection, before the component
+clones and build (§4) — so their prompts are front-loaded; they need only the
+primary checkout, not the components. (On `upgrade` they run after the pull/
+reconfigure pass, each an opt-in re-run.)
 
 Initial types (those yelmox needs today):
 

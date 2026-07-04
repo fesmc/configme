@@ -274,6 +274,50 @@ def test_nest_link_emits_no_self_referential_symlink(tmp_path, capsys):
     assert f"{tmp_path}/yelmo/FastHydrology/fesm-utils" in script
 
 
+def test_install_front_loads_extras_before_component_clones(tmp_path, capsys):
+    # New flow: the orchestrator extras (pip runme, runme config, data links) run
+    # early — after the primary clone, before the component clones and the slow
+    # build — so every prompt is front-loaded. Assert that order in `.install.sh`.
+    rc = install.run_install(
+        "yelmox", download="ssh", install_dir=str(tmp_path),
+        machine="macbook", compiler="gfortran",
+        overwrite=False, build_deps=False, dry_run=True, only=False,
+        link_args=None, select_fn=None, ask_fn=None, confirm_fn=lambda q, d: d,
+    )
+    assert rc == 0
+    script = capsys.readouterr().out
+    i_primary = script.index("# --- clone primary ---")
+    i_extras = script.index("# --- extras ---")
+    i_components = script.index("# --- clone components ---")
+    i_build = script.index("build with autotools")   # the slow fesm-utils build
+    # primary clone < extras < component clones < build (last).
+    assert i_primary < i_extras < i_components < i_build
+
+
+def test_install_seeds_hpc_account_so_runme_does_not_reask(tmp_path, monkeypatch):
+    # The hpc account is captured once, alongside machine/compiler, and seeded so
+    # runme_config reuses it. `prompt_hpc_account` is asked exactly once; the
+    # runme_config handler must not prompt again for hpc or account.
+    asks = []
+
+    def ask(label, default=None, *, complete_paths=False):
+        asks.append(label)
+        return "myproj" if "account" in label else default
+
+    monkeypatch.setattr("configme.extras._slurm_accounts", lambda: [])
+    rc = install.run_install(
+        "yelmox", download="ssh", install_dir=str(tmp_path),
+        machine="macbook", compiler="gfortran",
+        overwrite=False, build_deps=False, dry_run=True, only=False,
+        link_args=None, select_fn=None, ask_fn=ask, confirm_fn=lambda q, d: d,
+    )
+    assert rc == 0
+    # Exactly one account prompt total (the up-front capture); hpc is never asked
+    # (it defaults to the machine name).
+    assert sum("account" in a for a in asks) == 1
+    assert not any("hpc name" in a for a in asks)
+
+
 def test_general_nesting_invariant_no_node_precedes_its_container():
     # The reorder is a general rule: for every orchestrator, a node nested inside
     # another node's checkout must be ordered after it.

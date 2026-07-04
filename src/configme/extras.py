@@ -58,6 +58,28 @@ class _Ask(Protocol):
                  complete_paths: bool = False) -> Optional[str]: ...
 
 
+def prompt_hpc_account(cfg: dict, ask: _Ask,
+                       machine: Optional[str] = None) -> tuple:
+    """Resolve ``(hpc, account)`` for the ``runme_config`` extra, prompting only
+    for what is not already in ``cfg``.
+
+    ``hpc`` defaults to the machine name (runme's ``hpc`` is the machine). The
+    account is prompted with a best-effort Slurm-account hint. ``configme
+    install`` calls this up front — alongside machine/compiler selection — and
+    seeds the result into the cfg it hands ``run_extras``, so the later
+    ``runme_config`` step reuses these values without asking again (see
+    ``_runme_config``). A value already in ``config.toml`` is reused, not asked.
+    ``account`` may come back ``None`` (non-interactive, or the user skipped)."""
+    hpc = cfg.get("hpc") or machine
+    account = cfg.get("account")
+    if not account:
+        accounts = _slurm_accounts()
+        if accounts:
+            print(f"  available hpc accounts: {', '.join(accounts)}")
+        account = ask("hpc account for .runme/config.toml")
+    return hpc, account
+
+
 def pip_tool_url(name: str, ref: Optional[str] = None) -> str:
     """Git URL for a fesmc pip tool, optionally pinned to a ``ref`` (branch, tag,
     or commit) using pip's ``@ref`` VCS syntax — e.g. ``runme`` →
@@ -157,8 +179,13 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
     hpc = cfg.get("hpc") or ask("hpc name for .runme/config.toml", default=machine)
     # The account is too case-specific to default, but list the accounts the
     # user may submit under (best-effort, Slurm-only) as a hint before asking.
-    account = cfg.get("account")
-    if not account:
+    # A *present* ``account`` key is authoritative (even if empty): `configme
+    # install` collects it up front and seeds it here, so a seeded-but-empty
+    # account is a deliberate "skipped", not a reason to re-prompt. Only an
+    # absent key (e.g. the upgrade path, or config.toml without one) asks.
+    if "account" in cfg:
+        account = cfg["account"]
+    else:
         accounts = _slurm_accounts()
         if accounts:
             print(f"  available hpc accounts: {', '.join(accounts)}")
