@@ -1097,29 +1097,13 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             if not dry_run and dest.is_dir():
                 print(f"  - {node.name}: clone-only; no configuration")
             continue
-        if node.config_style == "build.py":
-            # _emit_build_py records its own outcome (built / deferred / failed)
-            # in results, so the parent node's status reflects what actually
-            # happened rather than the --build-deps flag.
-            _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                           info, results, confirm_fn, followups, project=project)
-            # A build.py package may also expose a makefile-template config
-            # subdir that configme generates directly. (fesm-utils instead now
-            # carries its utils component as a separate subpackage.)
-            if node.config_subdir:
-                label = f"{node.name}/{node.config_subdir}"
-                runner.emit(f"# configure {label} Makefile (configme)")
-                configure_makefile(label=label, pkg_name=node.name, dest=dest,
-                                    config_subdir=node.config_subdir,
-                                    is_orchestrator=False, **common_kw)
-            continue
         runner.emit(f"(cd {dest} && configme config {node.name} "
                     f"-m {machine} -c {compiler})")
         configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
                             config_subdir=node.config_subdir,
                             is_orchestrator=node.is_orchestrator, **common_kw)
-        # A package configme owns the build of (e.g. fesm-utils/utils) is
-        # compiled here, after its Makefile exists. Gated like the build.py step.
+        # A package configme owns the build of (e.g. fesm-utils) is compiled
+        # here, after its Makefile exists, via its [package.build] make target.
         if node.build is not None:
             _build_make_package(runner, node, dest, build_deps,
                                 confirm_fn, results, followups,
@@ -1184,7 +1168,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     auto-resolved deps, a '+'-literal list, or ``--only``) but never clones: a
     missing checkout, or one with uncommitted tracked changes, is skipped with a
     warning (run ``configme install`` / resolve it by hand instead). Only a
-    package whose pull advanced HEAD is rebuilt, and only when it is a build.py /
+    package whose pull advanced HEAD is rebuilt, and only when it is a
     make-built package — gated like ``install`` (``--build-deps`` forces the
     build, otherwise an interactive prompt asks).
 
@@ -1383,21 +1367,6 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
             runner.emit(f"# {node.name}: clone-only (configme does not configure it)")
             continue
 
-        if node.config_style == "build.py":
-            if node.config_subdir:
-                label = f"{node.name}/{node.config_subdir}"
-                runner.emit(f"# configure {label} Makefile (configme)")
-                configure_makefile(label=label, pkg_name=node.name, dest=dest,
-                                    config_subdir=node.config_subdir,
-                                    is_orchestrator=False, **common_kw)
-            if was_updated:
-                _emit_build_py(runner, node, dest, machine, compiler, build_deps,
-                               info, results, confirm_fn, project=project,
-                               prefer_skip_if_built=False)
-            elif dest.is_dir():
-                print(f"  - {node.name}: unchanged; skipping rebuild")
-            continue
-
         runner.emit(f"(cd {dest} && configme config {node.name} "
                     f"-m {machine} -c {compiler})")
         configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
@@ -1467,7 +1436,7 @@ def _artifacts_state(name: str, dest: Path) -> str:
 
     Mirrors the per-variant probe in ``status._inspect_builds`` but aggregates
     across variants, so the build step can skip an already-built package on an
-    idempotent re-run (see ``_emit_build_py`` / ``_build_make_package``)."""
+    idempotent re-run (see ``_build_make_package``)."""
     pkg = data.packages().get(name)
     if pkg is None or not pkg.artifacts:
         return "none"
@@ -1478,135 +1447,6 @@ def _artifacts_state(name: str, dest: Path) -> str:
     return "built" if present == len(paths) else "partial"
 
 
-def _stage_build_machine_file(dest, machine, project, dry_run, confirm_fn):
-    """Copy a configme-tier fesm-utils machine TOML (if the user authored one)
-    into the checkout's ``machines/<machine>.toml`` so build.py's ``-m`` resolves
-    it. configme carries the file verbatim — it does not model the modules /
-    per-component overrides it holds (those stay fesm-utils-specific).
-
-    No source authored, or no checkout on disk: no-op (build.py uses its bundled
-    machine, or errors as before). Target already present and byte-identical:
-    no-op. Target present but *different*: ask before overwriting (default no), so
-    a checkout's committed machine file is never silently clobbered. Dry runs only
-    print intent."""
-    src = context.resolve_build_machine_file(machine, project)
-    if src is None or not dest.is_dir():
-        return
-    target = dest / "machines" / f"{machine}.toml"
-    if dry_run:
-        print(f"  - would stage machines/{machine}.toml from {src}")
-        return
-    if target.is_file():
-        if target.read_bytes() == src.read_bytes():
-            return  # already in place and identical
-        prompt = (f"{target} exists and differs from your configme copy "
-                  f"({src}) — overwrite?")
-        overwrite = confirm_fn(prompt, False) if confirm_fn is not None else False
-        if not overwrite:
-            print(f"  - {machine}.toml: keeping the existing machines/ copy in "
-                  f"{dest.name}")
-            return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(src.read_bytes())
-    print(f"  + staged machines/{machine}.toml from {src}")
-
-
-def _emit_build_py(runner, node, dest, machine, compiler, build_deps, info,
-                   results, confirm_fn=None, followups=None, *,
-                   project=None, prefer_skip_if_built=True):
-    """fesm-utils-style package: print/run its build.py (see issue #7).
-
-    The build runs autotools and is slow (~10-30 min), so it is not run
-    unconditionally. ``--build-deps`` forces it; otherwise, on an interactive
-    run, the user is asked (default yes). Dry runs and non-interactive sessions
-    without ``--build-deps`` only print the command to run later.
-
-    Records the actual outcome in ``results``: ``deferred`` when the build is
-    not run (dry run, missing checkout, or the user declined), ``built`` on
-    success, ``failed`` on a build error.
-
-    Before anything else, stages a configme-defined machine into the checkout
-    (see ``_stage_build_machine_file``) so ``build.py -m {machine}`` resolves a
-    machine configme knows but build.py's bundled ``machines/`` does not.
-    """
-    nc_env = ""
-    if info is not None and info.nc_froot and info.nc_croot:
-        nc_env = f"NC_FROOT={info.nc_froot} NC_CROOT={info.nc_croot} "
-    cmd = f"{nc_env}./build.py --variant both -m {machine} -c {compiler}"
-    runner.emit(f"# {node.name}: build with autotools (slow, ~10-30 min):")
-    runner.emit(f"(cd {dest} && {cmd})")
-
-    # Make `-m {machine}` resolvable when the machine is configme-defined rather
-    # than one of build.py's bundled ones: copy the user's configme-tier TOML
-    # into the checkout. Done before the defer/early-return below so a later
-    # manual `-m {machine}` run works even when the build itself is deferred.
-    _stage_build_machine_file(dest, machine, project, runner.dry_run, confirm_fn)
-
-    def _defer() -> None:
-        print(f"  - {node.name}: build.py-style; run when ready:")
-        print(f"      (cd {dest} && {cmd})")
-        results["deferred"].append(node.name)
-        # Surface the command in the summary's consolidated deferred list — but
-        # not on a dry run, where the whole .install.sh is already previewed.
-        if followups is not None and not runner.dry_run:
-            followups.append(f"(cd {dest} && {cmd})")
-
-    if runner.dry_run or not dest.is_dir():
-        _defer()
-        return
-
-    # On an idempotent re-run an already-built package needs nothing; only an
-    # explicit --build-deps (or a confirmed prompt) rebuilds it. Upgrade passes
-    # prefer_skip_if_built=False because it only reaches here after a pull that
-    # advanced HEAD, so the existing artifacts are stale and must be rebuilt.
-    state = _artifacts_state(node.name, dest)
-    already_built = prefer_skip_if_built and state == "built"
-
-    do_build = build_deps
-    if not do_build and confirm_fn is not None:
-        if already_built:
-            print(f"  {node.name}: already built.")
-            print(f"      (cd {dest} && {cmd})")
-            do_build = confirm_fn(f"Rebuild {node.name}?", False)
-        else:
-            if state == "partial":
-                print(f"  {node.name}: build incomplete; rebuilding recommended.")
-            print(f"  {node.name} needs an autotools build (slow, ~10-30 min):")
-            print(f"      (cd {dest} && {cmd})")
-            do_build = confirm_fn(f"Build {node.name} now?", True)
-
-    if not do_build:
-        if already_built:
-            # Kept as-is: it is built, not a deferred/pending step.
-            print(f"  - {node.name}: keeping existing build")
-            results["built"].append(node.name)
-        else:
-            _defer()
-        return
-
-    print(f"  building {node.name}: {cmd}")
-    try:
-        env = dict(os.environ)
-        if info is not None and info.nc_froot:
-            env["NC_FROOT"] = info.nc_froot
-            env["NC_CROOT"] = info.nc_croot or ""
-        subprocess.run(["./build.py", "--variant", "both",
-                        "-m", machine, "-c", compiler],
-                       cwd=dest, check=True, env=env)
-        results["built"].append(node.name)
-        # Stamp the build so a later --link of this dir into another install
-        # warns when (machine, compiler) disagrees.
-        try:
-            links_mod.write_build_stamp(dest, tool="build.py", machine=machine,
-                                        compiler=compiler,
-                                        variants=["serial", "omp"])
-        except OSError:
-            pass
-    except (subprocess.CalledProcessError, OSError) as e:
-        print(f"  ! {node.name} build failed: {e}")
-        results["failed"].append(node.name)
-
-
 def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
                         followups=None, *, prefer_skip_if_built=True,
                         machine: Optional[str] = None,
@@ -1614,9 +1454,9 @@ def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
     """Compile a package whose build configme owns (`[package.build]`), once per
     variant: ``make openmp=<0|1> <make_target>``. Runs in the inherited shell
     environment (the Makefile already carries the configme-resolved compiler /
-    netCDF, so no module loading is needed here). Gated like the build.py step:
-    ``--build-deps`` forces it, an interactive run asks (default yes), and dry /
-    non-interactive runs only print the commands."""
+    netCDF, so no module loading is needed here). Gated so ``--build-deps``
+    forces it, an interactive run asks (default yes), and dry / non-interactive
+    runs only print the commands."""
     spec = node.build
     cmds = [(v, f"make openmp={spec.openmp_flag(v)} {spec.make_target}")
             for v in spec.variants]
@@ -1639,8 +1479,8 @@ def _build_make_package(runner, node, dest, build_deps, confirm_fn, results,
         _defer("configured")
         return
 
-    # See _emit_build_py: skip an already-built package on a re-run; upgrade
-    # passes prefer_skip_if_built=False so a post-pull rebuild still happens.
+    # Skip an already-built package on a re-run; upgrade passes
+    # prefer_skip_if_built=False so a post-pull rebuild still happens.
     state = _artifacts_state(node.name, dest)
     already_built = prefer_skip_if_built and state == "built"
 

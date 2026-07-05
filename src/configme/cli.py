@@ -83,7 +83,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     print("\nPackages:")
     if packages:
         for name, p in packages.items():
-            print(f"  {name:14s} {p.org}/{p.repo}  [{', '.join(p.config_styles)}]")
+            print(f"  {name:14s} {p.org}/{p.repo}  [{p.config_style}]")
     else:
         print("  (none)")
 
@@ -405,19 +405,6 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
         dest = install.dest_of(node, plan, root)
         if node.config_style == "none":
             # Clone-only component (e.g. vilma/bgc): nothing to (re)generate.
-            continue
-        if node.config_style == "build.py":
-            # The autotools build is a separate, slow step owned by `install`;
-            # `config` only (re)generates the makefile-template subcomponent.
-            print(f"  - {node.name}: build.py-style; build is a separate step "
-                  f"(`configme install {node.name} --build-deps`)")
-            if node.config_subdir:
-                install.configure_makefile(
-                    label=f"{node.name}/{node.config_subdir}", pkg_name=node.name,
-                    dest=dest, config_subdir=node.config_subdir,
-                    is_orchestrator=False, **common_kw)
-            else:
-                results["skipped"].append(node.name)
             continue
         install.configure_makefile(
             label=node.name, pkg_name=node.name, dest=dest,

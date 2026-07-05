@@ -181,8 +181,8 @@ def write_build_stamp(dest: Path, *, tool: str, machine: str, compiler: str,
                       variants: List[str]) -> Path:
     """Record (tool, machine, compiler, variants) inside the just-built package.
 
-    Tool is ``build.py`` or ``make`` — to let later diagnostics tell apart an
-    autotools build of fesm-utils from a Makefile build of fesm-utils/utils."""
+    Tool is ``make`` — recorded so later diagnostics can tell how a checkout was
+    last built (and warn on a mismatched --link)."""
     path = stamp_path(dest)
     body = (
         "# Written by configme. Records what this checkout was last built for.\n"

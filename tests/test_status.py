@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from configme import install, status
+from configme import data, install, status
 
 
 def checkout(path: Path) -> Path:
@@ -122,9 +122,11 @@ def test_build_pending_when_no_artifacts_present(tmp_path):
 
 def test_build_ok_when_all_artifacts_present(tmp_path):
     plan = install.build_plan("yelmox")
-    checkout(tmp_path / "fesm-utils")
-    touch(tmp_path / "fesm-utils" / "lis-serial/lib/liblis.a")
-    touch(tmp_path / "fesm-utils" / "fftw-serial/lib/libfftw3.a")
+    root = tmp_path / "fesm-utils"
+    checkout(root)
+    # All serial artifacts present (utils lib + fftw/lis/shtns), omp none.
+    for p in data.packages()["fesm-utils"].artifacts["serial"]:
+        touch(root / p)
     checks = status.inspect(plan, tmp_path)
     assert state_of(checks, "build", "fesm-utils (serial)") == "ok"
     assert state_of(checks, "build", "fesm-utils (omp)") == "pending"
@@ -133,24 +135,13 @@ def test_build_ok_when_all_artifacts_present(tmp_path):
 def test_build_partial_when_some_artifacts_present(tmp_path):
     plan = install.build_plan("yelmox")
     checkout(tmp_path / "fesm-utils")
-    touch(tmp_path / "fesm-utils" / "lis-serial/lib/liblis.a")  # only one of two
+    # Only one of the serial artifacts present -> partial.
+    touch(tmp_path / "fesm-utils" / "lis/lis-serial/lib/liblis.a")
     checks = status.inspect(plan, tmp_path)
     build = by_name(checks, "build")["fesm-utils (serial)"]
     assert build.state == "partial"
-    assert "fftw-serial/lib/libfftw3.a" in build.detail
+    assert "include-serial/libfesmutils.a" in build.detail
     assert status.has_problems(checks)
-
-
-def test_subpackage_build_probed_under_parent(tmp_path):
-    plan = install.build_plan("yelmox")
-    checkout(tmp_path / "fesm-utils")
-    utils = tmp_path / "fesm-utils" / "utils"
-    utils.mkdir(parents=True)
-    touch(utils / "include-serial/libfesmutils.a")
-    touch(utils / "include-omp/libfesmutils.a")
-    checks = status.inspect(plan, tmp_path)
-    assert state_of(checks, "build", "fesm-utils/utils (serial)") == "ok"
-    assert state_of(checks, "build", "fesm-utils/utils (omp)") == "ok"
 
 
 # --------------------------------------------------------------- extras

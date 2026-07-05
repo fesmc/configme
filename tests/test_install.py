@@ -32,111 +32,19 @@ def test_artifacts_state_none_when_no_artifacts_declared(tmp_path):
     assert install._artifacts_state("yelmo", tmp_path) == "none"
 
 
-# --------------------------------------------------- _stage_build_machine_file
-#
-# configme carries a user-authored fesm-utils machine TOML into the checkout's
-# machines/ so build.py's `-m <name>` resolves a configme-defined machine. The
-# user authors it in the user tier (~/.configme/machines/, via CONFIGME_HOME).
+# ------------------------------------ new machine/compiler scaffolds only a .mk
 
 
-def _author_user_tier_machine(monkeypatch, tmp_path, name, body="x=1\n"):
-    home = tmp_path / "home"
-    monkeypatch.setenv("CONFIGME_HOME", str(home))
-    src = home / "machines" / f"{name}.toml"
-    src.parent.mkdir(parents=True, exist_ok=True)
-    src.write_text(body)
-    return src
-
-
-def _checkout(tmp_path):
-    dest = tmp_path / "fesm-utils"
-    (dest / "machines").mkdir(parents=True)
-    return dest
-
-
-def test_stage_copies_when_target_absent(monkeypatch, tmp_path):
-    _author_user_tier_machine(monkeypatch, tmp_path, "chinook", "machine='chinook'\n")
-    dest = _checkout(tmp_path)
-    install._stage_build_machine_file(dest, "chinook", None, False, None)
-    assert (dest / "machines" / "chinook.toml").read_text() == "machine='chinook'\n"
-
-
-def test_stage_noop_when_no_authored_file(monkeypatch, tmp_path):
-    monkeypatch.setenv("CONFIGME_HOME", str(tmp_path / "empty-home"))
-    dest = _checkout(tmp_path)
-    install._stage_build_machine_file(dest, "chinook", None, False, None)
-    # build.py falls back to its own bundled machines/ — configme writes nothing.
-    assert not (dest / "machines" / "chinook.toml").exists()
-
-
-def test_stage_dry_run_does_not_write(monkeypatch, tmp_path):
-    _author_user_tier_machine(monkeypatch, tmp_path, "chinook")
-    dest = _checkout(tmp_path)
-    install._stage_build_machine_file(dest, "chinook", None, True, None)
-    assert not (dest / "machines" / "chinook.toml").exists()
-
-
-def test_stage_identical_target_is_noop(monkeypatch, tmp_path):
-    _author_user_tier_machine(monkeypatch, tmp_path, "chinook", "same\n")
-    dest = _checkout(tmp_path)
-    target = dest / "machines" / "chinook.toml"
-    target.write_text("same\n")
-    # A confirm_fn that fails the test if called — identical content must not prompt.
-    def _no_prompt(_q, _d):
-        raise AssertionError("must not prompt when target is identical")
-    install._stage_build_machine_file(dest, "chinook", None, False, _no_prompt)
-    assert target.read_text() == "same\n"
-
-
-def test_stage_differing_target_prompts_and_keeps_on_no(monkeypatch, tmp_path):
-    _author_user_tier_machine(monkeypatch, tmp_path, "chinook", "new\n")
-    dest = _checkout(tmp_path)
-    target = dest / "machines" / "chinook.toml"
-    target.write_text("committed\n")
-    install._stage_build_machine_file(dest, "chinook", None, False,
-                                      lambda _q, _d: False)
-    assert target.read_text() == "committed\n"  # checkout's copy preserved
-
-
-def test_stage_differing_target_overwrites_on_yes(monkeypatch, tmp_path):
-    _author_user_tier_machine(monkeypatch, tmp_path, "chinook", "new\n")
-    dest = _checkout(tmp_path)
-    target = dest / "machines" / "chinook.toml"
-    target.write_text("committed\n")
-    install._stage_build_machine_file(dest, "chinook", None, False,
-                                      lambda _q, _d: True)
-    assert target.read_text() == "new\n"
-
-
-def test_stage_differing_target_keeps_when_noninteractive(monkeypatch, tmp_path):
-    # confirm_fn is None (non-interactive): never clobber an existing checkout file.
-    _author_user_tier_machine(monkeypatch, tmp_path, "chinook", "new\n")
-    dest = _checkout(tmp_path)
-    target = dest / "machines" / "chinook.toml"
-    target.write_text("committed\n")
-    install._stage_build_machine_file(dest, "chinook", None, False, None)
-    assert target.read_text() == "committed\n"
-
-
-# ------------------------- new machine scaffolds the fesm-utils build.py TOML
-
-
-def test_new_machine_scaffolds_build_toml(monkeypatch, tmp_path):
-    # `configme new machine` (project=None: user tier only) drops both the .mk
-    # fragment and a fesm-utils build.py .toml stub, with the placeholder name
-    # substituted, ready to feed _stage_build_machine_file.
+def test_new_machine_scaffolds_only_mk(monkeypatch, tmp_path):
+    # `configme new machine` (project=None: user tier only) drops just the .mk
+    # fragment — the old fesm-utils build.py .toml stub is gone.
     monkeypatch.setenv("CONFIGME_HOME", str(tmp_path / "home"))
     written = context.create_fragment("machine", "chinook", src="linux", project=None)
     mk = tmp_path / "home" / "machines" / "chinook.mk"
-    toml = tmp_path / "home" / "machines" / "chinook.toml"
-    assert mk in written and toml in written
-    body = toml.read_text()
-    assert 'name = "chinook"' in body        # placeholder substituted
-    assert "my_cluster" not in body
-    assert "[compilers.gfortran]" in body    # seeded from the bundled template
+    assert written == [mk]
 
 
-def test_new_compiler_does_not_scaffold_toml(monkeypatch, tmp_path):
+def test_new_compiler_scaffolds_only_mk(monkeypatch, tmp_path):
     monkeypatch.setenv("CONFIGME_HOME", str(tmp_path / "home"))
     written = context.create_fragment("compiler", "myc", src="gfortran", project=None)
     assert written and all(p.suffix == ".mk" for p in written)
@@ -289,7 +197,7 @@ def test_install_front_loads_extras_before_component_clones(tmp_path, capsys):
     i_primary = script.index("# --- clone primary ---")
     i_extras = script.index("# --- extras ---")
     i_components = script.index("# --- clone components ---")
-    i_build = script.index("build with autotools")   # the slow fesm-utils build
+    i_build = script.index("fesm-utils: build (")   # the slow fesm-utils make build
     # primary clone < extras < component clones < build (last).
     assert i_primary < i_extras < i_components < i_build
 

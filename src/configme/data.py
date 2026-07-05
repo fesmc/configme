@@ -109,10 +109,10 @@ class Link:
 @dataclass
 class BuildSpec:
     """How configme compiles a makefile-template package it owns the build of
-    (currently only ``fesm-utils/utils``). The Makefile is generated first by
-    the normal configure step; configme then runs ``make openmp=<0|1>
-    <make_target>`` once per variant, in the inherited shell environment (no
-    module loading — that is the user's / build.py's responsibility)."""
+    (e.g. ``fesm-utils``). The Makefile is generated first by the normal
+    configure step; configme then runs ``make openmp=<0|1> <make_target>`` once
+    per variant, in the inherited shell environment (no module loading — that is
+    the user's responsibility)."""
 
     make_target: str
     variants: List[str] = field(default_factory=lambda: ["serial"])
@@ -161,7 +161,7 @@ class Package:
     org: str
     repo: str
     dir: str
-    config_style: str  # primary (behavioural): "makefile-template" | "build.py"
+    config_style: str  # behavioural: "makefile-template" | "none"
     # Git host the repo is cloned from (default GitHub). Lets a component live on
     # another host (e.g. a GitLab-hosted input repo) without special-casing.
     host: str = "github.com"
@@ -170,15 +170,11 @@ class Package:
     # where only HTTPS login is configured (e.g. GitLab). `-d no` (use existing
     # checkout) is never overridden. None means "follow the run's download mode".
     protocol: Optional[str] = None
-    config_subdir: str = ""  # e.g. fesm-utils keeps its config under utils/
+    config_subdir: str = ""  # config lives in a subdir of the checkout, if nonempty
     links: List[Link] = field(default_factory=list)
-    # Optional informational list of all config styles a package exposes, for
-    # display only (e.g. fesm-utils is build.py at the top but its utils/
-    # subcomponent is makefile-template). Defaults to [config_style].
-    config_styles: List[str] = field(default_factory=list)
-    # False for a component that lives inside another package's checkout (e.g.
-    # fesm-utils/utils): it is never cloned on its own and cannot be an install
-    # primary; it appears when its parent is cloned.
+    # False for a component that lives inside another package's checkout: it is
+    # never cloned on its own and cannot be an install primary; it appears when
+    # its parent is cloned.
     clone: bool = True
     # Components contained in this package's checkout, configured/built in the
     # same plan right after it (no separate clone). Names must be known packages.
@@ -188,9 +184,8 @@ class Package:
     # Build artifacts (library files) that prove a build completed, keyed by
     # variant name (serial/omp) -> paths relative to the package's checkout dir.
     # Lets `configme status` report build completeness by probing the disk,
-    # without re-running make. Build-style-agnostic: it works the same for a
-    # build.py package (fesm-utils' LIS+FFTW) and a `make` package
-    # (fesm-utils/utils' libfesmutils). Empty when a package declares none.
+    # without re-running make (e.g. fesm-utils' libfesmutils + fftw/lis/shtns
+    # archives). Empty when a package declares none.
     artifacts: Dict[str, List[str]] = field(default_factory=dict)
     # How this repo's *absence* is treated (see DESIGN.md sec. 9):
     #   "required" — cloned on install; a clone failure is a hard error (default)
@@ -226,7 +221,6 @@ class Package:
                 protocol=pkg.get("protocol"),
                 config_subdir=pkg.get("config_subdir", ""),
                 links=links,
-                config_styles=list(pkg.get("config_styles", [])) or [style],
                 clone=bool(pkg.get("clone", True)),
                 subpackages=list(pkg.get("subpackages", [])),
                 build=BuildSpec.from_dict(build, path) if build else None,

@@ -11,14 +11,19 @@ def test_fesm_utils_artifacts_loaded():
     pkgs = data.packages()
     art = pkgs["fesm-utils"].artifacts
     assert set(art) == {"serial", "omp"}
-    assert "lis-serial/lib/liblis.a" in art["serial"]
-    assert "fftw-omp/lib/libfftw3.a" in art["omp"]
+    # utils static lib + the vendored external libs, at the flattened paths.
+    assert "include-serial/libfesmutils.a" in art["serial"]
+    assert "lis/lis-serial/lib/liblis.a" in art["serial"]
+    assert "include-omp/libfesmutils.a" in art["omp"]
+    assert "fftw/fftw-omp/lib/libfftw3.a" in art["omp"]
 
 
-def test_utils_artifacts_loaded():
-    art = data.packages()["fesm-utils/utils"].artifacts
-    assert art["serial"] == ["include-serial/libfesmutils.a"]
-    assert art["omp"] == ["include-omp/libfesmutils.a"]
+def test_fesm_utils_is_makefile_template_with_build():
+    pkg = data.packages()["fesm-utils"]
+    assert pkg.config_style == "makefile-template"
+    assert pkg.build is not None
+    assert pkg.build.make_target == "all"
+    assert pkg.build.variants == ["serial", "omp"]
 
 
 def test_package_without_artifacts_is_empty():
