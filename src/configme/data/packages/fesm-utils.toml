@@ -1,28 +1,39 @@
-# fesm-utils: shared utility libraries. The repo's own build.py drives the
-# autotools build of LIS + FFTW (slow); its makefile-template `utils` component
-# is configured/built by configme as the `fesm-utils/utils` subpackage.
+# fesm-utils: the FESM shared utility library (libfesmutils) plus the vendored
+# external libraries FFTW, LIS and SHTns.
 #
-# Structural outlier: no config/Makefile template at the repo root. Its top-level
-# "configuration" is the autotools build, so configme treats it as a build.py
-# package (see docs/DESIGN.md sec. 8) and delegates utils to the subpackage.
+# A single makefile-template package. configme generates the repo-root Makefile
+# from config/Makefile (writing MACHINE/COMPILER, the compiler/machine fragments
+# and netCDF), then builds everything via `make openmp={0,1} all` — which builds
+# the external libraries (fftw/lis/shtns, via their autotools, keyed on
+# MACHINE/COMPILER in config/libs.mk) and the utils static library.
+#
+# (Previously this was a build.py package with a `fesm-utils/utils` subpackage;
+# the repo was flattened so utils lives at the root and one `make` drives it all.)
 
 [package]
 name = "fesm-utils"
 org = "fesmc"
 repo = "fesm-utils"
 dir = "fesm-utils"
-config_style = "build.py"
-# fesm-utils is build.py at the top (autotools build of LIS + FFTW), and carries
-# a makefile-template `utils` component as a contained subpackage. config_styles
-# is informational (shown by `configme list`); config_style drives behaviour.
-config_styles = ["build.py", "makefile-template"]
-# utils lives inside this checkout; configme configures and builds it as a
-# separate node that rides along wherever fesm-utils goes.
-subpackages = ["fesm-utils/utils"]
+config_style = "makefile-template"
 
-# Library files build.py produces, per variant (paths relative to the fesm-utils
-# checkout). `configme status` probes these to report whether the autotools
-# build of LIS + FFTW is complete for each variant.
+[package.build]
+# `make all` = the external libraries (fftw/lis/shtns) + the utils static lib.
+make_target = "all"
+variants = ["serial", "omp"]
+
+# Library files `make all` produces, per variant (paths relative to the checkout).
+# `configme status` probes these to report build completeness.
 [package.artifacts]
-serial = ["lis-serial/lib/liblis.a", "fftw-serial/lib/libfftw3.a"]
-omp = ["lis-omp/lib/liblis.a", "fftw-omp/lib/libfftw3.a"]
+serial = [
+    "include-serial/libfesmutils.a",
+    "fftw/fftw-serial/lib/libfftw3.a",
+    "lis/lis-serial/lib/liblis.a",
+    "SHTns/shtns-serial/lib/libshtns.a",
+]
+omp = [
+    "include-omp/libfesmutils.a",
+    "fftw/fftw-omp/lib/libfftw3.a",
+    "lis/lis-omp/lib/liblis.a",
+    "SHTns/shtns-omp/lib/libshtns_omp.a",
+]
