@@ -325,6 +325,52 @@ def _write_manifest(root: Path, package: str) -> None:
     (root / ".configme" / "manifest.toml").write_text(f'package = "{package}"\n')
 
 
+def _write_manifest_deps(root: Path, package: str, deps: list) -> None:
+    (root / ".configme").mkdir(parents=True, exist_ok=True)
+    deps_lit = ", ".join(f'"{d}"' for d in deps)
+    (root / ".configme" / "manifest.toml").write_text(
+        f'package = "{package}"\ndeps = [{deps_lit}]\n')
+
+
+def test_build_plan_orchestrator_ref_pins_primary():
+    # `configme install climber-x:alex-dev`: the bare name resolves the
+    # orchestrator; the ref is stamped CLI-pinned on the primary.
+    plan = install.build_plan("climber-x:alex-dev")
+    assert plan.primary.name == "climber-x" and plan.primary.is_orchestrator
+    assert plan.primary.ref == "alex-dev" and plan.primary.ref_pinned
+
+
+def test_build_plan_single_package_ref_pins_primary():
+    plan = install.build_plan("yelmo:foo")
+    assert plan.primary.name == "yelmo"
+    assert plan.primary.ref == "foo" and plan.primary.ref_pinned
+
+
+def test_build_plan_cli_component_ref_beats_orchestrator_default():
+    # climber-x pins yelmo -> `climber-x` branch by default; an explicit CLI ref
+    # on the `+` slot outranks it.
+    plan = install.build_plan("climber-x+yelmo:mybranch")
+    yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+    assert yelmo.ref == "mybranch" and yelmo.ref_pinned
+
+
+def test_apply_manifest_refs_leaves_cli_pinned_node(tmp_path):
+    # CLI ref is authoritative: the manifest pin must not override a CLI-pinned
+    # node, but still governs a non-pinned one.
+    _write_manifest_deps(tmp_path, "climber-x", ["yelmo:manifest-branch"])
+    project = context.find_project(tmp_path)
+
+    plan = install.build_plan("climber-x+yelmo:cli-branch")
+    install._apply_manifest_refs(plan.nodes, project)
+    yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+    assert yelmo.ref == "cli-branch"
+
+    plan = install.build_plan("climber-x")
+    install._apply_manifest_refs(plan.nodes, project)
+    yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+    assert yelmo.ref == "manifest-branch" and not yelmo.ref_pinned
+
+
 def test_host_orchestrator_for_returns_orch_when_target_is_component(tmp_path):
     _write_manifest(tmp_path, "yelmox")
     host = install._host_orchestrator_for("FastHydrology", tmp_path)
@@ -551,6 +597,29 @@ def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypat
 
     assert calls == ["FastEarth3D", "climber-x+FastEarth3D"]
     assert asked and "climber-x" in asked[0] and "FastEarth3D" in asked[0]
+
+
+def test_run_install_preserves_cli_ref_through_host_replan(tmp_path, monkeypatch):
+    # `configme install FastEarth3D:myref` inside climber-x: the replan to
+    # climber-x+FastEarth3D must keep the CLI ref on the component slot.
+    _write_manifest(tmp_path, "climber-x")
+    monkeypatch.chdir(tmp_path)
+    Bail = _stop_at_root_for(monkeypatch)
+    calls: list = []
+    _spy_build_plan(monkeypatch, calls)
+
+    try:
+        install.run_install(
+            "FastEarth3D:myref", download="ssh", install_dir=None,
+            machine="macbook", compiler="gfortran",
+            overwrite=False, build_deps=False, dry_run=True, only=False,
+            link_args=None, select_fn=None, ask_fn=None,
+            confirm_fn=lambda q, d: True,
+        )
+    except Bail:
+        pass
+
+    assert calls == ["FastEarth3D:myref", "climber-x+FastEarth3D:myref"]
 
 
 def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):

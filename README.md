@@ -56,6 +56,9 @@ configme install yelmox --dir ~/models/yelmox        # put the checkout here ins
 configme install yelmox --build-deps                 # rebuild dependency packages without prompting
 configme install yelmo                               # just yelmo + the sub-packages it needs
 configme install yelmo --only                        # only yelmo, nothing pulled in
+configme install yelmox:dev                          # orchestrator on its `dev` branch (its manifest then drives components)
+configme install climber-x:alex-dev                  # same for climber-x
+configme install yelmox+yelmo:mybranch               # pin one component; CLI ref overrides the manifest
 configme install yelmox --link fesm-utils=/abs/path  # symlink an existing checkout instead of cloning
 configme install yelmox --dry-run                    # preview what would be cloned/configured
 ```

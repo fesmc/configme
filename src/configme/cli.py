@@ -770,7 +770,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "install", help="clone/use-existing + configure + link a stack")
     p_install.add_argument(
         "target", help="orchestrator, package, or '+'-joined literal list "
-        "(e.g. yelmox, yelmo, yelmox+yelmo)")
+        "(e.g. yelmox, yelmo, yelmox+yelmo). Any name may carry a ':ref' "
+        "branch/tag/commit pin (e.g. yelmox:dev, climber-x:alex-dev), checked "
+        "out right after clone; a CLI ref overrides the manifest and "
+        "orchestrator defaults")
     p_install.add_argument("-d", "--download",
                            choices=["ssh", "https", "no"],
                            default="ssh",

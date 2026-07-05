@@ -112,11 +112,21 @@ seed manifest for that orchestrator.
 **Component ref pins.** A `deps` entry may pin a git ref with the same
 `name:ref` syntax the orchestrator uses (e.g. `"yelmo:climber-x"`). This lets a
 checkout — and the package owner editing it — declare the exact ref to build,
-including pointing a component at a development branch. Resolution precedence:
-the manifest pin **wins over** the orchestrator's shipped default
-(`component_refs`); a bare name carries no pin and falls back to that default
-(so removing a pin and re-running reverts to the canonical branch). The
-orchestrator default therefore only governs when no manifest ref is written.
+including pointing a component at a development branch. Resolution precedence
+(highest first):
+
+1. **CLI ref** — an explicit `name:ref` on the `install`/`config` target
+   (`configme install yelmox:dev`, or a `+`-slot like `yelmox+yelmo:foo`). A
+   CLI ref is authoritative and overrides everything below it, so an operator
+   can build a one-off branch without editing the manifest.
+2. **manifest pin** — `name:ref` in the checkout's `deps`.
+3. **orchestrator default** — the shipped `component_refs`.
+4. **repo default branch** — a bare name with no pin at any tier.
+
+Removing a higher-tier pin and re-running reverts to the next tier down (e.g.
+drop the manifest pin → the orchestrator default governs again). The
+orchestrator ref itself (the primary) has no manifest/orchestrator tier — its
+ref comes only from the CLI (`yelmox:dev`), else its repo default branch.
 
 configme **reconciles** each checkout to its resolved ref before that package's
 Makefile is (re)generated — the Makefile template lives inside the checkout and
@@ -159,6 +169,8 @@ identically for both.
 configme install yelmox                # orchestrator + its full default set
 configme install yelmo                 # one package + the sub-packages it needs (auto-resolve)
 configme install yelmox+yelmo          # exactly those two, literal, no auto-resolve
+configme install yelmox:dev            # orchestrator on its `dev` branch (checked out before its manifest is read)
+configme install yelmox+yelmo:foo      # literal list; pin the yelmo slot to `foo` (overrides manifest/orchestrator)
 ```
 
 Options (mirroring today's `install.py`):
@@ -196,6 +208,13 @@ Selection semantics:
   auto-resolution. (Missing dependencies are handled per §12d.)
 - An **orchestrator name** pulls its full default set.
 - **`--only`** collapses any of the above to exactly the named target.
+- Any name may carry a **`:ref` pin** (`yelmox:dev`, `climber-x:alex-dev`,
+  `yelmox+yelmo:foo`) — the bare name resolves the target and the ref is checked
+  out right after clone. Pinning the **orchestrator** is the intended lever for
+  "build off branch X": the orchestrator dictates downstream config, so its ref
+  is applied first and its branch's `.configme/manifest.toml` then governs the
+  components. A CLI ref outranks the manifest and orchestrator defaults (see
+  "Component ref pins" above).
 
 `configme install` may be run from anywhere (uses `--dir`) or from *inside* an
 already-cloned orchestrator/package, in which case it skips cloning that root

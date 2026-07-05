@@ -51,6 +51,12 @@ class Node:
     # means follow the run's `-d` download mode.
     protocol: Optional[str] = None
     ref: Optional[str] = None
+    # True when ``ref`` came from an explicit CLI ``name:ref`` spec (e.g.
+    # ``configme install yelmox:dev``). Such a ref is authoritative: the
+    # orchestrator- and manifest-ref override passes leave it untouched, so the
+    # CLI wins over both. Precedence: CLI ref > manifest pin > orchestrator
+    # default > repo default branch.
+    ref_pinned: bool = False
     # How this checkout's absence is handled at clone time: "required" (a clone
     # failure is fatal), "optional" (a failure is a soft "unavailable" skip — a
     # private repo the user may lack access to), or "prompt" (not cloned unless
@@ -153,6 +159,21 @@ def _node_for(name: str, *, prefer_package: bool = False) -> Node:
     raise InstallError(f"unknown target '{name}'. Supported: {', '.join(known)}")
 
 
+def _node_for_spec(spec: str, *, prefer_package: bool = False) -> Node:
+    """Resolve a CLI target token that may carry a ``name:ref`` pin.
+
+    The bare ``name`` selects the node (so ``yelmox:dev`` still resolves to the
+    ``yelmox`` orchestrator); an explicit ref stamps it and marks it CLI-pinned
+    so the manifest/orchestrator override passes leave it alone — the CLI ref
+    wins (see ``Node.ref_pinned``)."""
+    name, ref = data.split_ref(spec)
+    node = _node_for(name, prefer_package=prefer_package)
+    if ref:
+        node.ref = ref
+        node.ref_pinned = True
+    return node
+
+
 def _with_subpackages(nodes: List[Node]) -> List[Node]:
     """Expand each node's contained subpackages, inserted right after it. A
     subpackage shares its parent's checkout (not cloned separately), so its dest
@@ -201,6 +222,8 @@ def _apply_component_refs(nodes: List[Node],
     if orch is None or not orch.component_refs:
         return
     for n in nodes:
+        if n.ref_pinned:          # explicit CLI ref wins over the orchestrator
+            continue
         ref = orch.component_refs.get(n.name)
         if ref and n.clone:
             n.ref = ref
@@ -208,9 +231,11 @@ def _apply_component_refs(nodes: List[Node],
 
 def _apply_manifest_refs(nodes: List[Node], project) -> None:
     """Override node refs with the checkout manifest's own pins (``name:ref`` in
-    ``deps``). The manifest is authoritative — a package owner edits it to choose
-    the ref to build — so it wins over the orchestrator default already on the
-    node; bare manifest entries pin nothing and leave that default in place.
+    ``deps``). The manifest is authoritative over the orchestrator default — a
+    package owner edits it to choose the ref to build — so it wins over the
+    default already on the node; bare manifest entries pin nothing and leave that
+    default in place. An explicit CLI ref (``ref_pinned``) outranks even the
+    manifest and is left untouched here.
 
     Call this once ``project`` (and thus the on-disk manifest) is known: in
     ``config``/``upgrade`` after ``find_project``, and in ``install`` only after
@@ -221,6 +246,8 @@ def _apply_manifest_refs(nodes: List[Node], project) -> None:
     if not refs:
         return
     for n in nodes:
+        if n.ref_pinned:          # explicit CLI ref wins over the manifest
+            continue
         ref = refs.get(n.name)
         if ref and n.clone:
             n.ref = ref
@@ -274,24 +301,35 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
       * ``yelmox+yelmo``  exactly those, no expansion / auto-resolution
       * ``only=True``     exactly the named target — no orchestrator expansion
                           and no dependency resolution (the ``--only`` flag)
+
+    Any name (the primary or a ``+`` slot) may carry a ``:ref`` pin —
+    ``yelmox:dev``, ``climber-x:alex-dev``, ``yelmox:dev+yelmo:foo``. The bare
+    name resolves the node; the ref is checked out right after clone (and
+    reconciled by ``config``/``upgrade``). A CLI ref is authoritative — it wins
+    over both the orchestrator default and the checkout's manifest pin.
     """
     orchs = data.orchestrators()
     pkgs = data.packages()
 
     if "+" in target:
-        names = [t for t in target.split("+") if t]
+        specs = [t for t in target.split("+") if t]
+        # A slot may carry a `:ref` pin (`yelmox:dev+yelmo:foo`); match on the
+        # bare name and let `_node_for_spec` stamp the ref (CLI-pinned, so it
+        # outranks the manifest/orchestrator later).
+        names = [data.split_ref(s)[0] for s in specs]
         # The primary is the (first) orchestrator in the list; every other slot
         # resolves as a package so a dual-registered name (orchestrator + package,
         # e.g. FastEarth3D) installs as a component, not a nested orchestrator.
         primary_name = next((n for n in names if n in orchs), names[0])
-        nodes = [_node_for(n, prefer_package=(n != primary_name)) for n in names]
+        nodes = [_node_for_spec(s, prefer_package=(nm != primary_name))
+                 for s, nm in zip(specs, names)]
         primary = next(n for n in nodes if n.name == primary_name)
         orch = orchs.get(primary.name) if primary.is_orchestrator else None
         expanded = _with_subpackages(nodes)
         _apply_component_refs(expanded, orch)
         return _finalize_plan(primary, expanded, True, orch)
 
-    primary = _node_for(target)
+    primary = _node_for_spec(target)
 
     if only:
         # Exactly the named target: no deps. Subpackages still ride along (they
@@ -833,7 +871,11 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                 f"{plan.primary.name} as a component. Install it as a "
                 f"{host.name} component (share existing deps)?")
             if confirm_fn(question, True):
-                target = f"{host.name}+{plan.primary.name}"
+                # Preserve an explicit CLI ref (`configme install yelmo:foo`
+                # inside yelmox) so the rewrite to a host component keeps it.
+                comp = plan.primary.name + (
+                    f":{plan.primary.ref}" if plan.primary.ref else "")
+                target = f"{host.name}+{comp}"
                 plan = build_plan(target)
 
     root, primary_present = root_for(plan, install_dir, cwd)
