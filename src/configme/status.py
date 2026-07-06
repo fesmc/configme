@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-from configme import data, install
+from configme import color, data, install
 
 # "ok" is the only good state; everything else is reported.
 #   missing  a required component/link that should be present is not
@@ -52,6 +52,17 @@ _MARK = {
     "broken": "broken ",
     "partial": "partial",
     "pending": "pending",
+}
+
+# ANSI attributes for each state's ``[label]`` in a rendered row. ``ok`` is
+# green, the hard problems red (``missing`` also bold — it's the loudest), the
+# half-states yellow, and the deferred ``pending`` a calm cyan.
+_STATE_STYLE = {
+    "ok": ("green",),
+    "missing": ("red", "bold"),
+    "broken": ("red",),
+    "partial": ("yellow",),
+    "pending": ("cyan",),
 }
 
 
@@ -231,11 +242,12 @@ def has_problems(checks: List[Check]) -> bool:
 
 
 def _format_row(c: Check) -> str:
-    s = f"[{_MARK.get(c.state, c.state)}] {c.name}"
+    mark = color.style(_MARK.get(c.state, c.state), *_STATE_STYLE.get(c.state, ()))
+    s = f"[{mark}] {c.name}"
     if c.detail:
         s += f"  ({c.detail})"
     if c.state != _OK and c.hint:
-        s += f"  -> {c.hint}"
+        s += f"  -> {color.hint(c.hint)}"
     return s
 
 
@@ -254,14 +266,14 @@ def render(checks: List[Check], root: Path, primary: str, *,
     """Full ``configme status`` report. By default only non-ok rows are shown
     (a fully-ok category collapses to a one-line note); ``verbose`` shows every
     row. A footer lists the commands to resolve anything outstanding."""
-    lines = [f"configme status: {primary} at {root}"]
+    lines = [color.header(f"configme status: {primary} at {root}")]
     for cat, title in _CATEGORY_TITLES:
         rows = [c for c in checks if c.category == cat]
         if not rows:
             continue
         shown = rows if verbose else [c for c in rows if c.state != _OK]
         if not shown:
-            lines.append(f"\n  {title}: all present ({len(rows)})")
+            lines.append(f"\n  {title}: {color.ok(f'all present ({len(rows)})')}")
             continue
         lines.append(f"\n  {title}:")
         lines += ["    " + _format_row(c) for c in shown]
@@ -270,13 +282,13 @@ def render(checks: List[Check], root: Path, primary: str, *,
     pending = [c for c in checks if c.state == "pending"]
     lines.append("")
     if not problems and not pending:
-        lines.append("Everything present and built.")
+        lines.append(color.ok("Everything present and built."))
     else:
         bits = []
         if problems:
-            bits.append(f"{len(problems)} problem(s)")
+            bits.append(color.err(f"{len(problems)} problem(s)"))
         if pending:
-            bits.append(f"{len(pending)} pending")
+            bits.append(color.warn(f"{len(pending)} pending"))
         lines.append("Summary: " + ", ".join(bits) + ".")
 
     cmds = _commands(checks)

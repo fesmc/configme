@@ -30,6 +30,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Protocol
 
+from configme import color
+
 
 def _slurm_accounts() -> List[str]:
     """Best-effort list of Slurm accounts the current user may submit under, for
@@ -75,7 +77,7 @@ def prompt_hpc_account(cfg: dict, ask: _Ask,
     if not account:
         accounts = _slurm_accounts()
         if accounts:
-            print(f"  available hpc accounts: {', '.join(accounts)}")
+            color.cprint(f"  available hpc accounts: {', '.join(accounts)}")
         account = ask("hpc account for .runme/config.toml")
     return hpc, account
 
@@ -135,29 +137,29 @@ def _pip_package(value, runner, root: Path, cfg: dict, ask,
         # version refs can be confirmed installed — see `pip_tool_satisfied`.)
         if pip_tool_satisfied(name, ref):
             runner.emit(f"# pip_package {name}: {ref} already installed; skipping")
-            print(f"  pip_package {name}: {ref} already installed; skipping")
+            color.cprint(f"  pip_package {name}: {ref} already installed; skipping")
             status.append(f"{name}=present")
             continue
         # On `upgrade`, treat the tool like every other extra: opt-in per package
         # (default no; `-y` forces). Install always runs it unconditionally.
         if upgrade and confirm is not None and not confirm(
                 f"Update pip package {name} (pip install -U)?", False):
-            print(f"  - pip_package {name}: skipped")
+            color.cprint(f"  - pip_package {name}: skipped")
             status.append(f"{name}=skipped")
             continue
         # `-U` so an unpinned tool tracks latest and a pinned-but-mismatched one
         # is replaced; the `@ref` in the URL fixes exactly what gets fetched.
         runner.emit(f"pip install -U {url}")
         if runner.dry_run:
-            print(f"  pip_package {name}: (dry) pip install -U ({url})")
+            color.cprint(f"  pip_package {name}: (dry) pip install -U ({url})")
             continue
-        print(f"  pip_package {name}: installing/updating ({url})")
+        color.cprint(f"  pip_package {name}: installing/updating ({url})")
         try:
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-U", url], check=True)
             status.append(f"{name}=ok")
         except (subprocess.CalledProcessError, OSError) as e:
-            print(f"  ! pip install -U {name} failed: {e}")
+            color.cprint(f"  ! pip install -U {name} failed: {e}")
             status.append(f"{name}=failed")
     return ", ".join(status)
 
@@ -171,7 +173,7 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
     # forces). Install seeds .runme/config.toml unconditionally.
     if upgrade and confirm is not None and not confirm(
             "Re-run runme config (.runme/config.toml)?", False):
-        print("  - runme_config: skipped")
+        color.cprint("  - runme_config: skipped")
         return "skipped"
     dst = root / ".runme" / "config.toml"
     # The runme ``hpc`` is the machine name; default it to the machine this
@@ -188,7 +190,7 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
     else:
         accounts = _slurm_accounts()
         if accounts:
-            print(f"  available hpc accounts: {', '.join(accounts)}")
+            color.cprint(f"  available hpc accounts: {', '.join(accounts)}")
         account = ask("hpc account for .runme/config.toml")
     # `runme config init` is the canonical way to seed `.runme/config.toml`
     # (it copies `.runme/config.default.toml` and stamps in defaults); we then
@@ -197,23 +199,23 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
     runner.emit("# runme_config: seed .runme/config.toml and set hpc/account")
     runner.emit(" ".join(init_cmd))
     if runner.dry_run:
-        print(f"  runme_config: (dry) would run `{' '.join(init_cmd)}` to "
+        color.cprint(f"  runme_config: (dry) would run `{' '.join(init_cmd)}` to "
               f"create {dst} (hpc={hpc}, account={account})")
         return "dry"
     if dst.exists():
-        print(f"  runme_config: {dst} exists; leaving as-is")
+        color.cprint(f"  runme_config: {dst} exists; leaving as-is")
     else:
-        print(f"  runme_config: running `{' '.join(init_cmd)}` in {root}")
+        color.cprint(f"  runme_config: running `{' '.join(init_cmd)}` in {root}")
         try:
             subprocess.run(init_cmd, cwd=root, check=True)
         except (subprocess.CalledProcessError, OSError) as e:
-            print(f"  ! runme config init failed: {e}")
+            color.cprint(f"  ! runme config init failed: {e}")
             return "failed"
         if not dst.exists():
-            print(f"  runme_config: `{' '.join(init_cmd)}` did not produce {dst}; "
+            color.cprint(f"  runme_config: `{' '.join(init_cmd)}` did not produce {dst}; "
                   f"skipping patch")
             return "skipped"
-        print(f"  runme_config: created {dst}")
+        color.cprint(f"  runme_config: created {dst}")
     if dst.exists() and (hpc or account):
         text = dst.read_text()
         # TOML form: ``hpc = "value"`` / ``account = "value"``. Anchored on
@@ -226,7 +228,7 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
             text = re.sub(r'^(\s*account\s*=\s*")[^"]*(")',
                           rf'\g<1>{account}\g<2>', text, flags=re.MULTILINE)
         dst.write_text(text)
-        print(f"  runme_config: set hpc={hpc or '(unset)'}, "
+        color.cprint(f"  runme_config: set hpc={hpc or '(unset)'}, "
               f"account={account or '(unset)'}")
     return "ok"
 
@@ -245,13 +247,13 @@ def _data_link(value, runner, root: Path, cfg: dict, ask,
         if link_path.is_symlink() or link_path.exists():
             note = "" if link_path.exists() else " (target missing)"
             runner.emit(f"# data_link {label}: {link_path} exists; keeping{note}")
-            print(f"  data_link {label}: {link_path} exists; keeping{note}")
+            color.cprint(f"  data_link {label}: {link_path} exists; keeping{note}")
             done.append(f"{label}=exists")
             continue
         path = cfg.get(label) or ask(f"path to {label}", complete_paths=True)
         runner.emit(f"# data_link {label}: ln -s <path> {label}")
         if not path:
-            print(f"  data_link {label}: no path given; pending (link later)")
+            color.cprint(f"  data_link {label}: no path given; pending (link later)")
             done.append(f"{label}=pending")
             continue
         # Data links are stored as absolute, fully expanded paths (~ and $VARS
@@ -267,18 +269,18 @@ def _data_link(value, runner, root: Path, cfg: dict, ask,
         except OSError:
             self_loop = False
         if self_loop:
-            print(f"  ! data_link {label}: refusing self-referential link "
+            color.cprint(f"  ! data_link {label}: refusing self-referential link "
                   f"{link_path} -> {target} (target is its parent directory); "
                   f"skipping")
             done.append(f"{label}=skipped (self-loop)")
             continue
         runner.emit(f"ln -s {target} {label}")
         if runner.dry_run:
-            print(f"  data_link {label}: (dry) {link_path} -> {target}")
+            color.cprint(f"  data_link {label}: (dry) {link_path} -> {target}")
             continue
         link_path.symlink_to(target)
         msg = "" if target.exists() else " (target missing)"
-        print(f"  data_link {label}: {link_path} -> {target}{msg}")
+        color.cprint(f"  data_link {label}: {link_path} -> {target}{msg}")
         done.append(f"{label}=linked")
     return ", ".join(done)
 
@@ -311,11 +313,11 @@ def run_extras(orchestrator, runner, root: Path, cfg: dict,
     if not extras:
         return followups
     runner.emit("\n# --- extras ---")
-    print("Extras:")
+    color.cprint("Extras:")
     for name, value in extras.items():
         handler = _HANDLERS.get(name)
         if handler is None:
-            print(f"  ! unknown extra '{name}' (skipping)")
+            color.cprint(f"  ! unknown extra '{name}' (skipping)")
             continue
         handler(value, runner, root, cfg, ask, confirm, followups,
                 machine=machine, upgrade=upgrade)

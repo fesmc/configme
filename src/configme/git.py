@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
-from configme import install
+from configme import color, install
 
 
 class GitError(Exception):
@@ -102,7 +102,7 @@ def run_git(target: Optional[str], git_args: List[str], *,
 
     available = _enumerate_repos(plan, root)
     if not available:
-        print(f"configme git: no managed git checkouts under {root}.")
+        color.cprint(f"configme git: no managed git checkouts under {root}.")
         return 0
 
     wanted = _parse_repos(repos)
@@ -119,11 +119,11 @@ def run_git(target: Optional[str], git_args: List[str], *,
     auto_yes = yes or git_args[0] in READ_ONLY_VERBS
     reason = ("--yes" if yes
               else f"{git_args[0]!r} is read-only" if auto_yes else None)
-    print(f"configme git — {len(selected)} repo(s) under {root}:")
-    print(f"  $ {_shell(cmd)}")
+    color.cprint(color.header(f"configme git — {len(selected)} repo(s) under {root}:"))
+    color.cprint(f"  $ {_shell(cmd)}")
     if auto_yes:
-        print(f"  (auto-confirm: {reason})")
-    print()
+        color.cprint(f"  (auto-confirm: {reason})")
+    color.cprint()
 
     ran: List[Tuple[str, Path]] = []
     skipped: List[Tuple[str, Path]] = []
@@ -136,30 +136,30 @@ def run_git(target: Optional[str], git_args: List[str], *,
         except ValueError:
             label = f"{name} ({dest})"
         if not auto_yes and not confirm_fn(f"run in {label}?", True):
-            print(f"  - {name}: skipped")
+            color.cprint(f"  - {name}: skipped")
             skipped.append((name, dest))
             continue
-        print(f"  > {name}: (cd {dest} && {_shell(cmd)})")
+        color.cprint(f"  > {name}: (cd {dest} && {_shell(cmd)})")
         try:
             res = subprocess.run(cmd, cwd=dest)
         except OSError as e:
-            print(f"  ! {name}: failed to launch git ({e})")
+            color.cprint(f"  ! {name}: failed to launch git ({e})")
             failed.append((name, dest, -1))
             continue
         if res.returncode != 0:
-            print(f"  ! {name}: git exited {res.returncode}")
+            color.cprint(f"  ! {name}: git exited {res.returncode}")
             failed.append((name, dest, res.returncode))
         else:
             ran.append((name, dest))
 
-    print()
-    print(f"Summary: ran={len(ran)}  skipped={len(skipped)}  failed={len(failed)}")
+    color.cprint()
+    color.cprint(f"Summary: ran={len(ran)}  skipped={len(skipped)}  failed={len(failed)}")
     if ran or skipped or failed:
-        print("Commands:")
+        color.cprint("Commands:")
         for name, dest in ran:
-            print(f"  (cd {dest} && {_shell(cmd)})")
+            color.cprint(f"  (cd {dest} && {_shell(cmd)})")
         for name, dest in skipped:
-            print(f"  # (cd {dest} && {_shell(cmd)})    # skipped: {name}")
+            color.cprint(f"  # (cd {dest} && {_shell(cmd)})    # skipped: {name}")
         for name, dest, rc in failed:
-            print(f"  (cd {dest} && {_shell(cmd)})    # FAILED ({rc}): {name}")
+            color.cprint(f"  (cd {dest} && {_shell(cmd)})    # FAILED ({rc}): {name}")
     return 1 if failed else 0

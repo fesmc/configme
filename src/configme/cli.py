@@ -31,7 +31,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from configme import (__version__, context, cpu, data, extras, generate,
+from configme import (__version__, color, context, cpu, data, extras, generate,
                       install, netcdf, status)
 from configme import git as git_mod
 
@@ -863,7 +863,21 @@ def _build_parser() -> argparse.ArgumentParser:
                        "pull --ff-only, log -1 --decorate)")
     p_git.set_defaults(func=cmd_git)
 
+    # `--color {auto,always,never}` on every subcommand. Placed after the verb
+    # like the other options (-m/-c/--dry-run); added here in one loop rather
+    # than on each subparser so a new verb picks it up automatically.
+    for sp in sub.choices.values():
+        _add_color_arg(sp)
+
     return parser
+
+
+def _add_color_arg(p: argparse.ArgumentParser) -> None:
+    """Attach the shared ``--color`` option to a (sub)parser."""
+    p.add_argument("--color", choices=["auto", "always", "never"], default="auto",
+                   help="colorize output: 'auto' (color only when writing to a "
+                   "terminal; the default), 'always', or 'never'. Also honors "
+                   "the NO_COLOR / FORCE_COLOR environment variables.")
 
 
 # Flags the `git` subparser owns. The first set takes a value (`--target X`
@@ -935,7 +949,9 @@ def main(argv=None) -> int:
             cfg.add_argument("-c", "--compiler", default=None)
             cfg.add_argument("--only", action="store_true")
             cfg.add_argument("--dry-run", action="store_true")
+            _add_color_arg(cfg)
             a = cfg.parse_args(argv)
+            color.set_mode(a.color)
             if a.targets:
                 target_str = " ".join(a.targets)
                 cwd = Path.cwd()
@@ -953,6 +969,7 @@ def main(argv=None) -> int:
                               only=a.only, dry_run=a.dry_run)
 
         args = parser.parse_args(argv)
+        color.set_mode(getattr(args, "color", "auto"))
         if getattr(args, "verb", None) is None:
             return cmd_config(None, None, None)
         return args.func(args)
@@ -961,12 +978,13 @@ def main(argv=None) -> int:
         return 2
     except (data.DataError, context.ProjectError, generate.GenerateError,
             install.InstallError, netcdf.NetcdfError, git_mod.GitError) as e:
-        print(f"configme: {e}", file=sys.stderr)
+        print(color.err(f"configme: {e}", stream=sys.stderr), file=sys.stderr)
         return 1
 
 
 def _report_pending(e: NotImplementedYet) -> None:
-    print(f"configme: {e.what} is not implemented yet.", file=sys.stderr)
+    print(color.err(f"configme: {e.what} is not implemented yet.", stream=sys.stderr),
+          file=sys.stderr)
     print(f"  Tracked in issue #{e.issue} "
           f"(https://github.com/fesmc/configme/issues/{e.issue}).",
           file=sys.stderr)
