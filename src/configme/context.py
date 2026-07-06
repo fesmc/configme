@@ -148,24 +148,33 @@ def manifest_packages(project: Project) -> List[str]:
     return names
 
 
-def manifest_refs(project: Project) -> Dict[str, str]:
-    """Component git refs the checkout's own manifest pins, via ``name:ref``
-    entries in ``deps`` (e.g. ``"yelmo:climber-x"``).
+def read_manifest_refs(manifest_path: Path) -> Dict[str, str]:
+    """Component git refs a ``manifest.toml`` pins via ``name:ref`` entries in
+    ``deps`` (e.g. ``"yelmo:climber-x"``). Returns ``{name: ref}`` for pinned
+    entries only; a bare name carries no ref, and an absent manifest yields ``{}``.
 
-    The manifest is the source of truth a package owner can edit (including to
-    point a component at a development branch); these pins override the
-    orchestrator's shipped defaults. Returns ``{name: ref}`` for pinned entries
-    only — a bare name carries no ref here and so falls back to the orchestrator
-    default at resolution time. An absent manifest yields no pins (``{}``)."""
-    if not project.manifest_path.is_file():
+    Path-based (no ``Project``/orchestrator needed) so it reads any checkout's
+    manifest — including a *component's* own (e.g. yelmo's), which governs the
+    refs of the deps nested inside that checkout. This is what makes manifest
+    resolution recursive all the way down; see
+    ``install._apply_nested_manifest_refs``."""
+    if not manifest_path.is_file():
         return {}
-    manifest = _load_toml(project.manifest_path)
+    manifest = _load_toml(manifest_path)
     refs: Dict[str, str] = {}
     for dep in manifest.get("deps", []):
         name, ref = data.split_ref(dep)
         if ref:
             refs[name] = ref
     return refs
+
+
+def manifest_refs(project: Project) -> Dict[str, str]:
+    """Component git refs the project's own manifest pins (see
+    ``read_manifest_refs``). The manifest is the source of truth a package owner
+    can edit (including to point a component at a development branch); these pins
+    override the orchestrator's shipped defaults."""
+    return read_manifest_refs(project.manifest_path)
 
 
 # ----------------------------------------------------------- manifest authoring

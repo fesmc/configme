@@ -371,6 +371,62 @@ def test_apply_manifest_refs_leaves_cli_pinned_node(tmp_path):
     assert yelmo.ref == "manifest-branch" and not yelmo.ref_pinned
 
 
+def test_nested_manifest_ref_pins_deep_dependency(tmp_path):
+    # climber-x > yelmo > FastHydrology: yelmo's OWN manifest pins FastHydrology's
+    # ref, and it must be honoured even though FastHydrology is not a climber-x
+    # dep. climber-x's manifest never mentions FastHydrology.
+    plan = install.build_plan("climber-x")
+    yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+    fh = next(n for n in plan.nodes if n.name == "FastHydrology")
+    assert fh.parent == "yelmo" and fh.ref is None
+
+    # write yelmo's manifest at its on-disk location and resolve from it
+    yelmo_dest = install.dest_of(yelmo, plan, tmp_path)
+    _write_manifest_deps(yelmo_dest, "yelmo", ["fesm-utils", "FastHydrology:dev"])
+    install._apply_nested_manifest_refs(plan, tmp_path, yelmo)
+    assert fh.ref == "dev"
+
+
+def test_nested_manifest_leaves_shared_root_dep_alone(tmp_path):
+    # yelmo's manifest may also list the shared, root-level fesm-utils (symlinked,
+    # not nested). Per design that stays governed by the top orchestrator, so a
+    # ref there must NOT touch the root fesm-utils node.
+    plan = install.build_plan("climber-x")
+    yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+    fesm = next(n for n in plan.nodes if n.name == "fesm-utils")
+    yelmo_dest = install.dest_of(yelmo, plan, tmp_path)
+    _write_manifest_deps(yelmo_dest, "yelmo", ["fesm-utils:should-be-ignored"])
+    install._apply_nested_manifest_refs(plan, tmp_path, yelmo)
+    assert fesm.ref != "should-be-ignored"
+
+
+def test_nested_manifest_ref_yields_to_cli_pin(tmp_path):
+    # An explicit CLI ref on the nested dep outranks the parent manifest pin.
+    plan = install.build_plan("climber-x+yelmo+FastHydrology:cli")
+    yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+    fh = next(n for n in plan.nodes if n.name == "FastHydrology")
+    assert fh.ref_pinned and fh.ref == "cli"
+    yelmo_dest = install.dest_of(yelmo, plan, tmp_path)
+    _write_manifest_deps(yelmo_dest, "yelmo", ["FastHydrology:manifest"])
+    install._apply_nested_manifest_refs(plan, tmp_path, yelmo)
+    assert fh.ref == "cli"
+
+
+def test_apply_manifest_refs_recursive_walks_every_level(tmp_path):
+    # The recursive wrapper (config/upgrade path) resolves the primary's manifest
+    # AND each container's own, in one pass over a fully on-disk checkout.
+    plan = install.build_plan("climber-x")
+    yelmo = next(n for n in plan.nodes if n.name == "yelmo")
+    fh = next(n for n in plan.nodes if n.name == "FastHydrology")
+    _write_manifest_deps(tmp_path, "climber-x", ["yelmo:top"])
+    yelmo_dest = install.dest_of(yelmo, plan, tmp_path)
+    _write_manifest_deps(yelmo_dest, "yelmo", ["FastHydrology:deep"])
+    project = context.find_project(tmp_path)
+    install._apply_manifest_refs_recursive(plan, tmp_path, project)
+    assert yelmo.ref == "top"
+    assert fh.ref == "deep"
+
+
 def test_host_orchestrator_for_returns_orch_when_target_is_component(tmp_path):
     _write_manifest(tmp_path, "yelmox")
     host = install._host_orchestrator_for("FastHydrology", tmp_path)

@@ -253,6 +253,56 @@ def _apply_manifest_refs(nodes: List[Node], project) -> None:
             n.ref = ref
 
 
+def _apply_nested_manifest_refs(plan: "Plan", root: Path, container: Node) -> None:
+    """Apply a container checkout's own manifest pins to the deps nested inside it.
+
+    Manifest resolution is recursive: the top primary's manifest governs its
+    root-level components (``_apply_manifest_refs``), and each of those in turn
+    governs the refs of the deps nested in *its* checkout — so a pin propagates
+    all the way down (climber-x's manifest -> yelmo, yelmo's manifest ->
+    FastHydrology, ...). This reads ``container``'s on-disk
+    ``.configme/manifest.toml`` and stamps the refs it pins onto ``container``'s
+    nested children.
+
+    Only nested children (``parent == container.name``, own checkout) are
+    touched — a shared root-level dep (e.g. fesm-utils, symlinked not nested)
+    stays governed by the top orchestrator, and a subpackage (rides its parent's
+    checkout, ``clone = False``) has no ref of its own. A CLI ref
+    (``ref_pinned``) still outranks the manifest. Applied *after* the primary
+    manifest pass, so a nearer container overrides a farther one on the same dep.
+
+    Call once ``container`` is on disk: after its clone in ``install`` (its nested
+    children are ordered after it, so their clones still see the pin), or upfront
+    in ``config``/``upgrade`` where every checkout already exists. A container
+    with no manifest or no nested children is a no-op."""
+    children = [n for n in plan.nodes if n.parent == container.name and n.clone]
+    if not children:
+        return
+    mf = dest_of(container, plan, root) / ".configme" / "manifest.toml"
+    refs = context.read_manifest_refs(mf)
+    if not refs:
+        return
+    for n in children:
+        if n.ref_pinned:          # explicit CLI ref wins over the manifest
+            continue
+        ref = refs.get(n.name)
+        if ref:
+            n.ref = ref
+
+
+def _apply_manifest_refs_recursive(plan: "Plan", root: Path, project) -> None:
+    """Full manifest ref resolution for a fully on-disk checkout: the primary's
+    manifest pins its root-level components, then every container's own manifest
+    pins the deps nested inside it, down each level (``_apply_nested_manifest_refs``).
+
+    Used by ``config``/``upgrade``, where all checkouts already exist. ``install``
+    resolves the primary the same way but applies each container's nested pins
+    inline as it clones them (a container is not on disk until then)."""
+    _apply_manifest_refs(plan.nodes, project)
+    for node in plan.nodes:
+        _apply_nested_manifest_refs(plan, root, node)
+
+
 def _apply_nesting(nodes: List[Node]) -> None:
     """Anchor a dependency that its consumer nests inside its own checkout.
 
@@ -1045,6 +1095,10 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             else:
                 print(f"  ! {node.name}: {e}")
                 results["failed"].append(node.name)
+        # This checkout's own manifest pins the refs of any deps nested inside it
+        # (e.g. yelmo -> FastHydrology). Apply them now that it is on disk: its
+        # nested children are ordered after it, so they still clone onto the pin.
+        _apply_nested_manifest_refs(plan, root, node)
 
     # --- manifest (make the checkout self-describing, independent of its dir
     # name so e.g. `--dir check` is still recognised by a later bare `configme`)
@@ -1303,7 +1357,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     # template lives inside the checkout — so the ref must be correct first, and
     # `git pull --ff-only` then advances the right branch. A clean mismatch is
     # confirmed (default yes); a dirty or declined checkout is left untouched.
-    _apply_manifest_refs(plan.nodes, project)
+    _apply_manifest_refs_recursive(plan, root, project)
     runner.emit("\n# --- ref reconcile ---")
     for node in plan.nodes:
         if selected is not None and node.name not in selected:

@@ -376,7 +376,7 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
     # Makefile — the template lives inside the checkout and can differ between
     # refs. A clean branch mismatch is confirmed (default yes); a dirty or
     # declined checkout is left untouched and reported.
-    install._apply_manifest_refs(plan.nodes, project)
+    install._apply_manifest_refs_recursive(plan, root, project)
     reconciler = install.Runner(dry_run=dry_run)
     for node in plan.nodes:
         if not node.ref or not node.clone:

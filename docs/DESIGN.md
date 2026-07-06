@@ -128,6 +128,18 @@ drop the manifest pin → the orchestrator default governs again). The
 orchestrator ref itself (the primary) has no manifest/orchestrator tier — its
 ref comes only from the CLI (`yelmox:dev`), else its repo default branch.
 
+Manifest pins resolve **recursively, all the way down**: the primary's manifest
+governs its root-level components, and each of those checkouts governs the refs
+of the deps **nested inside it** (a `nest = true` dep — §16) via its own
+manifest. So `climber-x:alex-dev` checks out climber-x's `alex-dev` branch,
+whose manifest pins yelmo, whose manifest in turn pins the `FastHydrology` it
+carries at `yelmo/FastHydrology`. A nearer container wins over a farther one on
+the same dep, and a shared (symlinked, non-nested) dep like fesm-utils stays
+governed by the top orchestrator, not by each consumer. Because a container is
+not on disk until cloned, `install` applies each container's nested pins as it
+clones it (its nested deps clone afterward); `config`/`upgrade` resolve every
+level up front over the already-present checkouts.
+
 configme **reconciles** each checkout to its resolved ref before that package's
 Makefile is (re)generated — the Makefile template lives inside the checkout and
 can differ between refs, so the ref must be correct first. `install` switches a
