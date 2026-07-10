@@ -1,0 +1,17 @@
+# elsa: isochronal englacial layer tracing (Englacial Layer Simulation
+# Architecture). Advects a stack of isochronal layers through an ice-sheet
+# domain, driven by a host model's horizontal velocities, ice thickness and
+# surface/basal mass balance.
+
+[package]
+name = "elsa"
+org = "fesmc"
+repo = "elsa"
+dir = "elsa"
+config_style = "makefile-template"
+
+# elsa uses the ncio, nml, staggering and coords modules from fesm-utils, and
+# links the LIS solver that fesm-utils vendors and builds. This links
+# elsa/fesm-utils -> fesm-utils.
+[[package.links]]
+dep = "fesm-utils"
