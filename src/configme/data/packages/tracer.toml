@@ -1,0 +1,20 @@
+# tracer: Lagrangian tracer particles advected through an ice-sheet domain.
+#
+# Stand-alone for now (`configme install tracer --only`). Once yelmo's source
+# uses it, add a nested link entry to yelmo.toml, as FastHydrology has:
+#
+#   [[package.links]]
+#   dep = "tracer"
+#   nest = true
+
+[package]
+name = "tracer"
+org = "fesmc"
+repo = "tracer"
+dir = "tracer"
+config_style = "makefile-template"
+
+# tracer uses the ncio and nml modules from fesm-utils; it carries no netCDF
+# calls of its own. This links tracer/fesm-utils -> fesm-utils.
+[[package.links]]
+dep = "fesm-utils"
