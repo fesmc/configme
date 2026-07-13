@@ -128,6 +128,28 @@ drop the manifest pin → the orchestrator default governs again). The
 orchestrator ref itself (the primary) has no manifest/orchestrator tier — its
 ref comes only from the CLI (`yelmox:dev`), else its repo default branch.
 
+**Machine-dependent refs (`@machine`).** A component whose *correct* checkout
+depends on the host it is built on — e.g. climber-x's `vilma`, which ships
+precompiled, per-HPC libraries — pins the sentinel ref `@machine` instead of a
+concrete branch. The sentinel flows through the four tiers above like any other
+ref (a CLI/manifest pin still overrides it); if it survives to clone time,
+configme resolves it against the package's shipped `machine_refs` map
+(`machine → branch`, in `packages/<name>.toml`) using the machine being built
+for:
+
+- **machine recognised** → its branch is checked out, with a notice naming the
+  per-HPC dependence (`vilma: selected 'dkrz_levante' branch for machine …`);
+- **machine unrecognised** → the map's optional `"*"` wildcard branch, else the
+  repo default, is kept — with a **warning** that a machine-specific branch may
+  need building by hand;
+- **explicit pin present** → a CLI/manifest `name:ref` has already displaced the
+  sentinel, so it wins untouched; configme just notes that a machine branch
+  exists. This is the escape hatch for building a one-off vilma branch anywhere.
+
+Because a machine maps to its own branch explicitly (pik_hpc2024 → `main`),
+`main` stays an ordinary branch — nothing is overloaded to mean "unset". Adding
+a new cluster is a one-line PR to the component's `machine_refs`.
+
 Manifest pins resolve **recursively, all the way down**: the primary's manifest
 governs its root-level components, and each of those checkouts governs the refs
 of the deps **nested inside it** (a `nest = true` dep — §16) via its own

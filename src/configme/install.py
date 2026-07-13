@@ -303,6 +303,63 @@ def _apply_manifest_refs_recursive(plan: "Plan", root: Path, project) -> None:
         _apply_nested_manifest_refs(plan, root, node)
 
 
+# The ref sentinel a package/orchestrator uses to say "resolve my ref from the
+# component's per-machine `machine_refs` map, using the machine being built for".
+# It flows through the normal ref-precedence chain like any other ref, so an
+# explicit CLI or manifest pin still overrides it; only when it survives to clone
+# time does ``_apply_machine_refs`` turn it into a concrete branch.
+MACHINE_REF_SENTINEL = "@machine"
+
+
+def _apply_machine_refs(nodes: List[Node], machine: Optional[str]) -> None:
+    """Resolve the ``@machine`` ref sentinel to a per-machine branch, and warn
+    when a machine-dependent component lands somewhere without a known branch.
+
+    A package with per-host precompiled artifacts (e.g. climber-x's vilma) pins
+    its ref to ``@machine`` (in the orchestrator's component list); this pass —
+    run once the machine is resolved and after every manifest override — looks
+    the machine up in the package's ``machine_refs`` map:
+
+    - **machine recognised** -> check out its branch, and say so (the per-HPC
+      dependence is non-obvious, so the notice names it);
+    - **machine unrecognised** -> fall back to the ``"*"`` wildcard branch if the
+      map has one, else the repo's default branch, and *warn* that the artifacts
+      are per-HPC and may need a machine-specific branch built by hand;
+    - **an explicit pin already won** (the node carries a concrete ref, not the
+      sentinel, because the CLI or manifest overrode it) -> leave it, but note
+      that a machine-specific branch exists so the override is a deliberate,
+      visible choice.
+
+    Idempotent: a node whose ref is neither the sentinel nor machine-mapped is
+    untouched, so re-running config/upgrade is a no-op."""
+    pkgs = data.packages()
+    for n in nodes:
+        pkg = pkgs.get(n.name)
+        if pkg is None or not pkg.machine_refs:
+            continue
+        mrefs = pkg.machine_refs
+        known = ", ".join(k for k in mrefs if k != "*") or "(none)"
+        if n.ref == MACHINE_REF_SENTINEL:
+            if machine is not None and machine in mrefs:
+                n.ref = mrefs[machine]
+                color.cprint(
+                    f"  {n.name}: selected '{n.ref}' branch for machine "
+                    f"'{machine}' (ships per-HPC precompiled libraries).")
+            else:
+                n.ref = mrefs.get("*")  # None -> the repo's default branch
+                target = f"'{n.ref}' branch" if n.ref else "the repo default branch"
+                color.cprint(
+                    f"  ~ {n.name}: ships per-HPC precompiled libraries but "
+                    f"machine '{machine or 'unknown'}' has no known branch — "
+                    f"staying on {target}. You may need a branch built for this "
+                    f"machine (known: {known}).")
+        elif n.ref and machine in mrefs and mrefs[machine] != n.ref:
+            color.cprint(
+                f"  {n.name}: using pinned ref '{n.ref}'; a machine-specific "
+                f"branch ('{mrefs[machine]}') exists for '{machine}' but your "
+                f"explicit pin takes precedence.")
+
+
 def _apply_nesting(nodes: List[Node]) -> None:
     """Anchor a dependency that its consumer nests inside its own checkout.
 
@@ -1010,6 +1067,10 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     compiler_path, compiler_tier = context.resolve_fragment("compiler", compiler, project)
     runner.emit(f"# target={target}  machine={machine}  compiler={compiler}")
     color.cprint(f"  machine={machine}  compiler={compiler}  download={download}")
+    # Now the machine is known, resolve any ``@machine`` ref sentinel to the
+    # component's per-host branch (and warn on an unrecognised machine) before
+    # the component clones below check the ref out.
+    _apply_machine_refs(plan.nodes, machine)
     if link_map:
         color.cprint("  links:")
         for pkg, path in link_map.items():
@@ -1358,6 +1419,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     # `git pull --ff-only` then advances the right branch. A clean mismatch is
     # confirmed (default yes); a dirty or declined checkout is left untouched.
     _apply_manifest_refs_recursive(plan, root, project)
+    _apply_machine_refs(plan.nodes, machine)
     runner.emit("\n# --- ref reconcile ---")
     for node in plan.nodes:
         if selected is not None and node.name not in selected:

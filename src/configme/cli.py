@@ -377,6 +377,7 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
     # refs. A clean branch mismatch is confirmed (default yes); a dirty or
     # declined checkout is left untouched and reported.
     install._apply_manifest_refs_recursive(plan, root, project)
+    install._apply_machine_refs(plan.nodes, machine)
     reconciler = install.Runner(dry_run=dry_run)
     for node in plan.nodes:
         if not node.ref or not node.clone:

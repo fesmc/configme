@@ -155,6 +155,24 @@ def _parse_artifacts(raw: dict, source: Path) -> Dict[str, List[str]]:
     return out
 
 
+def _parse_machine_refs(raw: dict, source: Path) -> Dict[str, str]:
+    """Validate and normalise a ``[package.machine_refs]`` table: a mapping of
+    machine name (or the ``"*"`` wildcard) -> git ref (branch/tag/commit) string.
+    A malformed entry is a data error, not a silent skip, since it would quietly
+    send a build to the repo's default branch on the wrong machine."""
+    if not isinstance(raw, dict):
+        raise DataError(f"{source}: [package.machine_refs] must be a table "
+                        f"(machine name -> git ref)")
+    out: Dict[str, str] = {}
+    for machine, ref in raw.items():
+        if not isinstance(ref, str) or not ref:
+            raise DataError(
+                f"{source}: [package.machine_refs] '{machine}' must be a "
+                f"non-empty git-ref string")
+        out[machine] = ref
+    return out
+
+
 @dataclass
 class Package:
     name: str
@@ -199,6 +217,15 @@ class Package:
     # If True, run `git submodule update --init --recursive` after cloning
     # (e.g. bgc carries the M4AGO submodule).
     submodules: bool = False
+    # Per-machine git refs, for a package whose correct checkout depends on the
+    # host it is built on (e.g. climber-x's vilma ships precompiled, per-HPC
+    # libraries — main only works on pik_hpc2024, other clusters need their own
+    # branch). Maps a machine name (as auto-detected / selected) to the branch to
+    # check out, with an optional ``"*"`` wildcard as the fallback for an
+    # unrecognised machine. This map is consulted only when the resolved ref is
+    # the ``@machine`` sentinel (see install.MACHINE_REF_SENTINEL); an explicit
+    # CLI/manifest pin still wins. Empty for a package with no per-host variance.
+    machine_refs: Dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_file(cls, path: Path) -> "Package":
@@ -227,6 +254,7 @@ class Package:
                 artifacts=artifacts,
                 clone_policy=_parse_clone_policy(pkg, path),
                 submodules=bool(pkg.get("submodules", False)),
+                machine_refs=_parse_machine_refs(pkg.get("machine_refs", {}), path),
             )
         except KeyError as e:
             raise DataError(f"{path}: [package] missing required key {e}") from e

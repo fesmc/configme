@@ -30,7 +30,11 @@ default_packages = ["fesm-utils", "yelmo:climber-x", "FastEarth3D"]
 # (no access) is a soft skip recorded as "unavailable" — never a hard failure.
 #   * bgc   — HAMOCC ocean biogeochemistry (carries the M4AGO submodule).
 #   * vilma — VILMA solid-earth model (prebuilt lib for the FULL build variant).
-optional_packages = ["bgc", "vilma"]
+#             Its prebuilt libraries are per-HPC, so it pins the `@machine`
+#             sentinel: configme picks the right branch for the detected machine
+#             from vilma's `machine_refs` map (packages/vilma.toml). A user who
+#             wants a specific branch overrides it in .configme/manifest.toml.
+optional_packages = ["bgc", "vilma:@machine"]
 
 # Auxiliary/data repos cloned at the climber-x root, outside the build graph.
 #   * climber-x-input — large CLIMBER-X input data on GitLab, cloned into

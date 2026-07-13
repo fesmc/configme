@@ -50,6 +50,39 @@ def test_parse_artifacts_normalises():
     assert out == {"serial": ["a.a", "b.a"]}
 
 
+# ------------------------------------------------------------- machine_refs
+
+def test_parse_machine_refs_normalises():
+    out = data._parse_machine_refs({"dkrz_levante": "dkrz_levante", "*": "main"},
+                                   Path("x.toml"))
+    assert out == {"dkrz_levante": "dkrz_levante", "*": "main"}
+
+
+def test_parse_machine_refs_rejects_non_table():
+    with pytest.raises(data.DataError):
+        data._parse_machine_refs(["not", "a", "table"], Path("x.toml"))
+
+
+def test_parse_machine_refs_rejects_non_string_ref():
+    with pytest.raises(data.DataError):
+        data._parse_machine_refs({"m": 3}, Path("x.toml"))
+
+
+def test_parse_machine_refs_rejects_empty_ref():
+    with pytest.raises(data.DataError):
+        data._parse_machine_refs({"m": ""}, Path("x.toml"))
+
+
+def test_package_without_machine_refs_is_empty():
+    assert data.packages()["yelmo"].machine_refs == {}
+
+
+def test_vilma_declares_per_machine_branches():
+    mrefs = data.packages()["vilma"].machine_refs
+    assert mrefs["dkrz_levante"] == "dkrz_levante"
+    assert mrefs["pik_hpc2024"] == "main"
+
+
 # --------------------------------------------------------------- clone_policy
 
 def test_clone_policy_defaults_to_required():

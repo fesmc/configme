@@ -427,6 +427,53 @@ def test_apply_manifest_refs_recursive_walks_every_level(tmp_path):
     assert fh.ref == "deep"
 
 
+# ---------------------------------------------------- machine-dependent refs
+
+def test_build_plan_pins_vilma_to_machine_sentinel():
+    # climber-x pins vilma -> @machine so its per-HPC branch is resolved later.
+    plan = install.build_plan("climber-x")
+    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    assert vilma.ref == install.MACHINE_REF_SENTINEL
+
+
+def test_machine_refs_recognized_machine_selects_its_branch():
+    plan = install.build_plan("climber-x")
+    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    install._apply_machine_refs(plan.nodes, "dkrz_levante")
+    assert vilma.ref == "dkrz_levante"
+
+
+def test_machine_refs_pik_maps_to_main():
+    # main carries pik's prebuilt libraries: a recognized machine mapping to main
+    # is resolved explicitly (no ambiguity with "unset").
+    plan = install.build_plan("climber-x")
+    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    install._apply_machine_refs(plan.nodes, "pik_hpc2024")
+    assert vilma.ref == "main"
+
+
+def test_machine_refs_unrecognized_machine_falls_to_repo_default_and_warns(capsys):
+    plan = install.build_plan("climber-x")
+    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    install._apply_machine_refs(plan.nodes, "some_laptop")
+    assert vilma.ref is None  # no "*" fallback -> repo default branch
+    out = capsys.readouterr().out
+    assert "per-HPC" in out and "some_laptop" in out
+
+
+def test_machine_refs_explicit_pin_wins_over_machine_map(tmp_path):
+    # A manifest pin overrides @machine (the node no longer carries the sentinel);
+    # the pass leaves the pin and notes a machine branch exists.
+    _write_manifest_deps(tmp_path, "climber-x", ["vilma:my-branch"])
+    project = context.find_project(tmp_path)
+    plan = install.build_plan("climber-x")
+    install._apply_manifest_refs(plan.nodes, project)
+    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    assert vilma.ref == "my-branch"
+    install._apply_machine_refs(plan.nodes, "dkrz_levante")
+    assert vilma.ref == "my-branch"  # untouched
+
+
 def test_host_orchestrator_for_returns_orch_when_target_is_component(tmp_path):
     _write_manifest(tmp_path, "yelmox")
     host = install._host_orchestrator_for("FastHydrology", tmp_path)

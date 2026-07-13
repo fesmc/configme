@@ -7,6 +7,17 @@
 # Provides a prebuilt library (vega_pism.a) and headers referenced by climber-x's
 # FULL build variant; configme clones it but does not configure or build it
 # (`config_style = "none"`).
+#
+# The prebuilt libraries are compiled per-HPC, so the *correct branch depends on
+# where you install*. climber-x pins vilma to the `@machine` sentinel, and the
+# `[package.machine_refs]` map below tells configme which branch to check out for
+# the detected machine:
+#   * a recognised machine  -> its branch is checked out (with a notice);
+#   * an unrecognised machine -> the repo default (main) is kept, with a warning
+#     that a machine-specific branch may need building by hand;
+#   * an explicit pin in .configme/manifest.toml (e.g. `vilma:my-branch`) always
+#     wins over this map.
+# Add a new cluster by opening a PR that adds its branch here.
 
 [package]
 name = "vilma"
@@ -15,3 +26,11 @@ repo = "vilma"
 dir = "vilma"
 config_style = "none"
 clone_policy = "optional"
+
+# Machine -> branch carrying that HPC's precompiled libraries. main is built for
+# pik_hpc2024; other clusters have their own branch. "*" (omitted here) would set
+# a fallback for unrecognised machines — left out so those get main + a warning.
+[package.machine_refs]
+pik_hpc2024 = "main"
+dkrz_levante = "dkrz_levante"
+awi_albedo = "awi_albedo"
