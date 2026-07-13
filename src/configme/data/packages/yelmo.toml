@@ -21,3 +21,14 @@ dep = "fesm-utils"
 [[package.links]]
 dep = "FastHydrology"
 nest = true
+
+# yelmo's %trc passive-tracer subsystem `use`s elsa (layer tracing) and tracer
+# (Lagrangian particles) as alternative backends. Both are yelmo-only deps, so
+# nest them inside yelmo's checkout (yelmo/elsa, yelmo/tracer) like FastHydrology.
+[[package.links]]
+dep = "elsa"
+nest = true
+
+[[package.links]]
+dep = "tracer"
+nest = true
