@@ -60,21 +60,76 @@ class _Ask(Protocol):
                  complete_paths: bool = False) -> Optional[str]: ...
 
 
-def prompt_hpc_account(cfg: dict, ask: _Ask,
-                       machine: Optional[str] = None) -> tuple:
-    """Resolve ``(hpc, account)`` for the ``runme_config`` extra, prompting only
-    for what is not already in ``cfg``.
+def _read_runme_hpc_account(runme_path: Optional[Path]) -> tuple:
+    """Extract ``(hpc, account)`` from an existing ``.runme/config.toml``,
+    mirroring the anchored regex the writer (``_runme_config``) uses so read and
+    write stay symmetric regardless of which TOML section the keys sit in. An
+    empty string value counts as unset. Returns ``(None, None)`` when the file is
+    absent or a key is missing/blank."""
+    if runme_path is None or not runme_path.is_file():
+        return None, None
+    text = runme_path.read_text()
 
-    ``hpc`` defaults to the machine name (runme's ``hpc`` is the machine). The
-    account is prompted with a best-effort Slurm-account hint. ``configme
-    install`` calls this up front — alongside machine/compiler selection — and
-    seeds the result into the cfg it hands ``run_extras``, so the later
-    ``runme_config`` step reuses these values without asking again (see
-    ``_runme_config``). A value already in ``config.toml`` is reused, not asked.
-    ``account`` may come back ``None`` (non-interactive, or the user skipped)."""
-    hpc = cfg.get("hpc") or machine
-    account = cfg.get("account")
-    if not account:
+    def grab(key: str) -> Optional[str]:
+        m = re.search(rf'^\s*{key}\s*=\s*"([^"]*)"', text, flags=re.MULTILINE)
+        return m.group(1) if (m and m.group(1)) else None
+
+    return grab("hpc"), grab("account")
+
+
+def prompt_hpc_account(cfg: dict, ask: _Ask, machine: Optional[str] = None, *,
+                       root: Optional[Path] = None,
+                       configme_path: Optional[Path] = None) -> tuple:
+    """Resolve ``(hpc, account)`` for the ``runme_config`` extra, prompting only
+    for what is not already recorded.
+
+    Values are resolved with a fixed precedence — ``.configme/config.toml`` (the
+    ``cfg`` dict) first, then the repo's ``.runme/config.toml`` (read via
+    ``root``). A value found in either file is *reused, not asked*: it is printed
+    with a note pointing at the file to edit if it is wrong (mirroring how the
+    already-chosen machine is echoed rather than re-prompted). Only a value
+    absent from both files is prompted for — the account with a best-effort
+    Slurm-account hint.
+
+    ``hpc`` is runme's machine name, so it defaults to the ``machine`` this
+    install already resolved. If a file *does* pin an ``hpc`` that disagrees with
+    the selected machine, that is almost certainly stale config, so a warning is
+    printed (the file value still wins — the user is told where to fix it).
+
+    ``configme install`` calls this up front — alongside machine/compiler
+    selection — and seeds the result into the cfg it hands ``run_extras``, so the
+    later ``runme_config`` step reuses these values without asking again (see
+    ``_runme_config``). ``account`` may come back ``None`` (non-interactive, or
+    the user skipped)."""
+    runme_path = (root / ".runme" / "config.toml") if root else None
+    runme_hpc, runme_account = _read_runme_hpc_account(runme_path)
+
+    def resolve(key: str, runme_val: Optional[str]) -> tuple:
+        """(value, source-path) preferring .configme over .runme; (None, None)
+        when neither file records the key."""
+        if cfg.get(key):
+            return cfg[key], configme_path
+        if runme_val:
+            return runme_val, runme_path
+        return None, None
+
+    # hpc — runme's machine name. A file value is authoritative but warned about
+    # when it contradicts the machine actually selected for this install.
+    hpc, hpc_src = resolve("hpc", runme_hpc)
+    if hpc is None:
+        hpc = machine
+    else:
+        if machine and hpc != machine:
+            color.cprint(f"  ! warning: hpc '{hpc}' in {hpc_src} does not match "
+                         f"selected machine '{machine}' — edit {hpc_src} to fix")
+        color.cprint(f"  hpc: {hpc} (from {hpc_src}; edit there to change)")
+
+    # account — reuse a recorded value (printed, not asked); otherwise prompt.
+    account, acct_src = resolve("account", runme_account)
+    if account is not None:
+        color.cprint(f"  hpc account: {account} "
+                     f"(from {acct_src}; edit there to change)")
+    else:
         accounts = _slurm_accounts()
         if accounts:
             color.cprint(f"  available hpc accounts: {', '.join(accounts)}")

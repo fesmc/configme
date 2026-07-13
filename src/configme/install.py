@@ -1079,14 +1079,17 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
 
     # Capture the runme hpc/account now, alongside machine/compiler, so the
     # runme_config extra (run just below — before the slow component clones and
-    # build) reuses them instead of stopping to ask later. hpc defaults to the
-    # machine name; a value already in config.toml is reused, not re-asked. Only
-    # an orchestrator that seeds runme's config needs it.
+    # build) reuses them instead of stopping to ask later. Values already in
+    # .configme/config.toml or the repo's .runme/config.toml are reused (printed,
+    # not re-asked); hpc otherwise defaults to the machine name. Only an
+    # orchestrator that seeds runme's config needs it.
     _ask = ask_fn or (lambda label, default=None, *, complete_paths=False: default)
     extras_cfg = context.load_config(project) if project else {}
     if (plan.orchestrator is not None
             and (plan.orchestrator.extras or {}).get("runme_config")):
-        hpc, account = extras_mod.prompt_hpc_account(extras_cfg, _ask, machine=machine)
+        hpc, account = extras_mod.prompt_hpc_account(
+            extras_cfg, _ask, machine=machine, root=root,
+            configme_path=project.config_path if project else None)
         # Seed both so run_extras' runme_config asks nothing (account may be ""
         # when skipped / non-interactive — a present key still suppresses the ask).
         extras_cfg = {**extras_cfg, "hpc": hpc,

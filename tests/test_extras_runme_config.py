@@ -224,3 +224,67 @@ def test_init_produced_no_file_returns_skipped(tmp_path, monkeypatch):
                                cfg={"hpc": "h", "account": "a"},
                                ask=_ask_factory())
     assert out == "skipped"
+
+
+# ------------------------------------------- prompt_hpc_account source precedence
+
+def _write_runme(root, body):
+    d = root / ".runme"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "config.toml").write_text(body)
+    return d / "config.toml"
+
+
+def test_prompt_reads_account_from_existing_runme_config(tmp_path, monkeypatch, capsys):
+    """An account already in the repo's .runme/config.toml is reused (printed,
+    not asked) — the prompt is never shown."""
+    monkeypatch.setattr(extras, "_slurm_accounts", lambda: [])
+    _write_runme(tmp_path, 'hpc = "awi_albedo"\naccount = "envi.p_forclima"\n')
+    ask = _ask_factory()
+
+    hpc, account = extras.prompt_hpc_account(
+        {}, ask, machine="awi_albedo", root=tmp_path)
+
+    assert (hpc, account) == ("awi_albedo", "envi.p_forclima")
+    assert ask.calls == []                        # never prompted
+    assert "envi.p_forclima" in capsys.readouterr().out
+
+
+def test_prompt_configme_cfg_beats_runme_config(tmp_path, monkeypatch):
+    """.configme/config.toml wins over the repo's .runme/config.toml."""
+    monkeypatch.setattr(extras, "_slurm_accounts", lambda: [])
+    _write_runme(tmp_path, 'account = "from_runme"\n')
+    ask = _ask_factory()
+
+    _, account = extras.prompt_hpc_account(
+        {"account": "from_configme"}, ask, machine="m", root=tmp_path)
+
+    assert account == "from_configme"
+    assert ask.calls == []
+
+
+def test_prompt_asks_when_account_absent_everywhere(tmp_path, monkeypatch):
+    """No recorded account anywhere → fall through to the interactive prompt."""
+    monkeypatch.setattr(extras, "_slurm_accounts", lambda: [])
+    _write_runme(tmp_path, 'hpc = "awi_albedo"\naccount = ""\n')   # blank == unset
+    ask = _ask_factory(["typed_acct"])
+
+    _, account = extras.prompt_hpc_account(
+        {}, ask, machine="awi_albedo", root=tmp_path)
+
+    assert account == "typed_acct"
+    assert len(ask.calls) == 1
+
+
+def test_prompt_warns_on_hpc_machine_mismatch(tmp_path, monkeypatch, capsys):
+    """A file hpc that disagrees with the selected machine is honoured but
+    flagged with a warning pointing at the file."""
+    monkeypatch.setattr(extras, "_slurm_accounts", lambda: [])
+    _write_runme(tmp_path, 'hpc = "other_machine"\naccount = "a"\n')
+
+    hpc, _ = extras.prompt_hpc_account(
+        {}, _ask_factory(), machine="awi_albedo", root=tmp_path)
+
+    out = capsys.readouterr().out
+    assert hpc == "other_machine"                 # file value still wins
+    assert "warning" in out and "does not match" in out
