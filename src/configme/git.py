@@ -59,6 +59,33 @@ def _shell(cmd: Iterable[str]) -> str:
     return " ".join(shlex.quote(a) for a in cmd)
 
 
+def _current_ref(dest: Path) -> str:
+    """Best-effort name of the currently checked-out ref for ``dest``: the
+    branch name on a normal checkout, ``detached@<short-sha>`` when HEAD is
+    detached, or ``?`` if git can't be queried. Used purely to label output so
+    the user always sees which version of a repo a command is hitting."""
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=dest, capture_output=True, text=True)
+    except OSError:
+        return "?"
+    if res.returncode != 0:
+        return "?"
+    ref = res.stdout.strip()
+    if ref and ref != "HEAD":
+        return ref
+    # Detached HEAD (or empty): fall back to the short commit SHA.
+    try:
+        sha = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=dest, capture_output=True, text=True)
+    except OSError:
+        return "detached"
+    short = sha.stdout.strip() if sha.returncode == 0 else ""
+    return f"detached@{short}" if short else "detached"
+
+
 def _parse_repos(spec: Optional[str]) -> Optional[List[str]]:
     if spec is None:
         return None
@@ -130,36 +157,40 @@ def run_git(target: Optional[str], git_args: List[str], *,
     failed: List[Tuple[str, Path, int]] = []
 
     for name, dest in selected:
+        # Stamp the current ref onto the label (e.g. ``fesm-utils:main``) so it
+        # is always clear which checked-out version the command is hitting —
+        # read just before running, so it reflects the tree the command acts on.
+        disp = f"{name}:{_current_ref(dest)}"
         try:
             rel = dest.relative_to(root)
-            label = f"{name} ({rel})" if str(rel) != "." else name
+            label = f"{disp} ({rel})" if str(rel) != "." else disp
         except ValueError:
-            label = f"{name} ({dest})"
+            label = f"{disp} ({dest})"
         if not auto_yes and not confirm_fn(f"run in {label}?", True):
-            color.cprint(f"  - {name}: skipped")
-            skipped.append((name, dest))
+            color.cprint(f"  - {disp}: skipped")
+            skipped.append((disp, dest))
             continue
-        color.cprint(f"  > {name}: (cd {dest} && {_shell(cmd)})")
+        color.cprint(f"  > {disp}: (cd {dest} && {_shell(cmd)})")
         try:
             res = subprocess.run(cmd, cwd=dest)
         except OSError as e:
-            color.cprint(f"  ! {name}: failed to launch git ({e})")
-            failed.append((name, dest, -1))
+            color.cprint(f"  ! {disp}: failed to launch git ({e})")
+            failed.append((disp, dest, -1))
             continue
         if res.returncode != 0:
-            color.cprint(f"  ! {name}: git exited {res.returncode}")
-            failed.append((name, dest, res.returncode))
+            color.cprint(f"  ! {disp}: git exited {res.returncode}")
+            failed.append((disp, dest, res.returncode))
         else:
-            ran.append((name, dest))
+            ran.append((disp, dest))
 
     color.cprint()
     color.cprint(f"Summary: ran={len(ran)}  skipped={len(skipped)}  failed={len(failed)}")
     if ran or skipped or failed:
         color.cprint("Commands:")
-        for name, dest in ran:
+        for disp, dest in ran:
             color.cprint(f"  (cd {dest} && {_shell(cmd)})")
-        for name, dest in skipped:
-            color.cprint(f"  # (cd {dest} && {_shell(cmd)})    # skipped: {name}")
-        for name, dest, rc in failed:
-            color.cprint(f"  (cd {dest} && {_shell(cmd)})    # FAILED ({rc}): {name}")
+        for disp, dest in skipped:
+            color.cprint(f"  # (cd {dest} && {_shell(cmd)})    # skipped: {disp}")
+        for disp, dest, rc in failed:
+            color.cprint(f"  (cd {dest} && {_shell(cmd)})    # FAILED ({rc}): {disp}")
     return 1 if failed else 0
