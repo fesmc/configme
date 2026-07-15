@@ -420,7 +420,7 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
     # (re)generates Makefiles, so this surfaces repos/links/builds/extras the
     # user still needs to address (see `configme status`). Skipped on a dry run.
     if not dry_run:
-        block = status.pending_block(status.inspect(plan, root))
+        block = status.pending_block(plan, status.inspect(plan, root), root)
         if block:
             print(block)
     return 1 if results["failed"] else 0
@@ -446,7 +446,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     plan = install.build_plan(target)
     root, _ = install.root_for(plan, args.install_dir, cwd)
     checks = status.inspect(plan, root)
-    print(status.render(checks, root, plan.primary.name, verbose=args.verbose))
+    print(status.render(plan, checks, root, verbose=args.verbose))
     return 1 if status.has_problems(checks) else 0
 
 

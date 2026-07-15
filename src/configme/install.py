@@ -1293,24 +1293,30 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                    for n in plan.nodes if n.clone]
     if comp_labels:
         color.cprint(f"  components: {', '.join(comp_labels)}")
-    for key in ("configured", "built", "linked", "pending",
-                "deferred", "skipped", "unavailable", "failed"):
+    # Positive actions this run, then run-specific problems. What still needs
+    # doing (pending/deferred/skipped) is *not* listed here — the pending block
+    # below is the single, authoritative outstanding picture, so listing it twice
+    # (once as "what this run left" and again as "what's still pending") is the
+    # redundancy this summary deliberately avoids.
+    for key in ("configured", "built", "linked", "unavailable", "failed"):
         if results[key]:
             color.cprint(f"  {key}: {', '.join(results[key])}")
-    if followups:
+    # Read-only picture of everything still outstanding across the whole checkout
+    # — covers pre-existing state (an optional repo/data clone skipped earlier, a
+    # deferred build), not just what this run deferred — with the minimal set of
+    # commands to clear it (deferred follow-ups folded into that same list).
+    # Imported lazily to avoid a status <-> install import cycle. Skipped on a dry
+    # run (the previewed .install.sh already shows what would change).
+    if not dry_run:
+        from configme import status
+        block = status.pending_block(plan, status.inspect(plan, root), root,
+                                     extra_commands=tuple(followups or ()))
+        if block:
+            color.cprint(block)
+    elif followups:
         color.cprint("\nDeferred — run these when ready:")
         for cmd in followups:
             color.cprint(f"  {cmd}")
-    # Read-only "still pending" picture of the whole checkout — covers
-    # pre-existing state (e.g. an optional repo or data clone skipped on an
-    # earlier run, a deferred build), not just what this run deferred. Imported
-    # lazily to avoid a status <-> install import cycle. Skipped on a dry run
-    # (the previewed .install.sh already shows what would change).
-    if not dry_run:
-        from configme import status
-        block = status.pending_block(status.inspect(plan, root))
-        if block:
-            color.cprint(block)
     return 1 if results["failed"] else 0
 
 
