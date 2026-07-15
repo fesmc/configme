@@ -261,9 +261,21 @@ def _runme_config(value, runner, root: Path, cfg: dict, ask,
         color.cprint(f"  runme_config: {dst} exists; leaving as-is")
     else:
         color.cprint(f"  runme_config: running `{' '.join(init_cmd)}` in {root}")
+        # Capture runme's stdout rather than letting it stream: its "Next steps —
+        # edit .runme/config.toml" guidance is written for a standalone `runme
+        # config init` and is noise here, since configme seeds hpc/account itself
+        # right below. On failure we echo what runme printed so the error isn't
+        # swallowed.
         try:
-            subprocess.run(init_cmd, cwd=root, check=True)
-        except (subprocess.CalledProcessError, OSError) as e:
+            subprocess.run(init_cmd, cwd=root, check=True,
+                           capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            color.cprint(f"  ! runme config init failed: {e}")
+            out = (e.stdout or "") + (e.stderr or "")
+            if out.strip():
+                color.cprint(out.rstrip())
+            return "failed"
+        except OSError as e:
             color.cprint(f"  ! runme config init failed: {e}")
             return "failed"
         if not dst.exists():
