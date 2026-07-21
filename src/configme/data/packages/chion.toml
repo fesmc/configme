@@ -1,0 +1,36 @@
+# chion: the snowpack mass and energy balance model.
+#
+# Fortran port of Chion.jl. Provides three interchangeable surface mass balance
+# models (BESSI layered snowpack, PDD, ITM) behind one API, built as the static
+# library libchion.a for use by yelmox, where it is intended to replace smbpal.
+#
+# A plain makefile-template package: configme generates the repo-root Makefile
+# from config/Makefile (writing MACHINE/COMPILER, the compiler/machine fragments
+# and netCDF), then `make chion-static` builds the library. chion's only Fortran
+# dependency is fesm-utils (precision, nml, ncio, variable_io) -- it needs no
+# linear solver, no FFTW and no PETSc, since its one implicit solve is a
+# tridiagonal system handled in-tree.
+
+[package]
+name = "chion"
+org = "fesmc"
+repo = "chion"
+dir = "chion"
+config_style = "makefile-template"
+
+# Links created inside this package's directory: chion/fesm-utils -> fesm-utils
+# at the orchestrator root, matching yelmo.
+[[package.links]]
+dep = "fesm-utils"
+
+[package.build]
+make_target = "chion-static"
+variants = ["serial", "omp"]
+
+# Library files `make chion-static` produces, per variant (paths relative to the
+# checkout). `configme status` probes these to report build completeness.
+# chion writes both variants to the same objdir, so the two entries coincide;
+# they are listed separately to keep the variant contract explicit.
+[package.artifacts]
+serial = ["libchion/include/libchion.a"]
+omp = ["libchion/include/libchion.a"]
