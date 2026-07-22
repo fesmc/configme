@@ -1,0 +1,28 @@
+# insol: orbital solution and insolation library (libinsol).
+#
+# Provides daily-mean insolation for any latitude and any time between -5 Ma
+# and +1 Ma from the Laskar et al. (2004) orbital elements, plus a surface
+# irradiance decomposition (DNI/DHI) used for renewable energy applications.
+#
+# Not currently a component of any orchestrator: yelmox vendors the insolation
+# source directly under libs/insol. Listed here so it can be cloned and
+# configured on its own (`configme install insol`).
+
+[package]
+name = "insol"
+org = "fesmc"
+repo = "insol"
+dir = "insol"
+config_style = "makefile-template"
+
+# insol uses ncio from fesm-utils for the netCDF-reading irradiance tests. The
+# core library and its regression tests do not need it (see config/common.mk),
+# but the link is created so `make test-dni` works out of the box.
+[[package.links]]
+dep = "fesm-utils"
+
+[package.build]
+make_target = "static"
+
+[package.artifacts]
+serial = ["libinsol/include/libinsol.a"]
