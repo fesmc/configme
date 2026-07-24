@@ -8,6 +8,16 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.15.0
+
+### Added
+
+- `aeros` package — fast global atmospheric model (spectral primitive-equation
+  core, built as `libaeros.a`). Standalone for now: it is intended to couple to
+  climber-x's ocean and to yelmo, but not before its own M4/M5 milestones, so
+  it is not yet a component of any orchestrator. Depends on fesm-utils, which
+  also supplies the SHTns and FFTW builds it links.
+
 ## 0.14.1
 
 ### Changed

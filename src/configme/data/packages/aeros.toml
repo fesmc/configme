@@ -1,0 +1,47 @@
+# aeros: fast global atmospheric model.
+#
+# Spectral primitive-equation core (triangular truncation T31-T42, L16-20) for
+# coupled climate-ice-sheet simulation on 10^4-10^6 yr timescales, built as the
+# static library libaeros.a. OpenMP-only by design -- the core is small enough
+# (~4,600 columns at T31) that distributed memory would add communication to a
+# problem already communication-bound at high thread counts.
+#
+# A plain makefile-template package: configme generates the repo-root Makefile
+# from config/Makefile (writing MACHINE/COMPILER, the compiler/machine fragments
+# and netCDF), then `make aeros-static` builds the library. Its one Fortran
+# dependency is fesm-utils, from which it takes precision, nml, ncio,
+# variable_io and coords -- and also the two external C libraries it links:
+# SHTns (spherical-harmonic transforms, the model's performance kernel) and the
+# FFTW beneath it. Both are built by fesm-utils' own build.py into
+# fesm-utils/{SHTns,fftw}/*-{serial,omp}/, so aeros needs no separate library
+# slot; it just needs fesm-utils built for the matching variant.
+#
+# Not currently a component of any orchestrator. It is intended to couple to
+# CLIMBER-X's ocean and to Yelmo, but only from M4/M5 (see aeros docs/design.md),
+# so until then it is cloned and configured on its own (`configme install aeros`).
+
+[package]
+name = "aeros"
+org = "fesmc"
+repo = "aeros"
+dir = "aeros"
+config_style = "makefile-template"
+
+# Links created inside this package's directory: aeros/fesm-utils -> fesm-utils
+# at the orchestrator root, matching yelmo and chion.
+[[package.links]]
+dep = "fesm-utils"
+
+[package.build]
+make_target = "aeros-static"
+variants = ["serial", "omp"]
+
+# Library files `make aeros-static` produces, per variant (paths relative to the
+# checkout). `configme status` probes these to report build completeness.
+# aeros writes both variants to the same objdir, so the two entries coincide;
+# they are listed separately to keep the variant contract explicit. The
+# precision=dp build goes to libaeros/include-dp/ and is not probed -- it is an
+# additional configuration, not a required artifact.
+[package.artifacts]
+serial = ["libaeros/include/libaeros.a"]
+omp = ["libaeros/include/libaeros.a"]
