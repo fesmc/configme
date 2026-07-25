@@ -1,0 +1,41 @@
+# rembo: regional energy-moisture balance atmosphere model (second generation).
+#
+# A 2-D energy-moisture-balance atmosphere that downscales a reference
+# climatology under anomaly forcing and drives an ice-sheet model, with the
+# surface energy / mass balance handled by chion (through rembo's rembo_surface
+# wrapper). Built as the static library librembo.a.
+#
+# A plain makefile-template package: configme generates the repo-root Makefile
+# from config/Makefile (writing MACHINE/COMPILER, the compiler/machine fragments
+# and netCDF), then `make rembo-static` builds the library. rembo's Fortran
+# dependencies are fesm-utils (precision, nml, ncio, variable_io) and chion (the
+# surface model). It needs no linear solver, FFTW or PETSc.
+#
+# NOTE: this is the second-generation rembo; the original is registered
+# separately as `rembo1`.
+
+[package]
+name = "rembo"
+org = "alex-robinson"
+repo = "rembo"
+dir = "rembo"
+config_style = "makefile-template"
+
+# Links created inside this package's directory: rembo/fesm-utils -> fesm-utils
+# and rembo/chion -> chion at the orchestrator root, matching yelmo/chion.
+[[package.links]]
+dep = "fesm-utils"
+
+[[package.links]]
+dep = "chion"
+
+[package.build]
+make_target = "rembo-static"
+variants = ["serial", "omp"]
+
+# Library files `make rembo-static` produces, per variant (paths relative to the
+# checkout). `configme status` probes these to report build completeness. rembo
+# writes both variants to the same objdir, so the two entries coincide.
+[package.artifacts]
+serial = ["librembo/include/librembo.a"]
+omp = ["librembo/include/librembo.a"]
