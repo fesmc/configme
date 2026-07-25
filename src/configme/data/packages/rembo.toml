@@ -11,8 +11,9 @@
 # dependencies are fesm-utils (precision, nml, ncio, variable_io) and chion (the
 # surface model). It needs no linear solver, FFTW or PETSc.
 #
-# NOTE: this is the second-generation rembo; the original is registered
-# separately as `rembo1`.
+# rembo's Fortran dependencies are fesm-utils, chion (surface model) and insol
+# (orbital insolation). NOTE: this is the second-generation rembo; the original
+# is registered separately as `rembo1`.
 
 [package]
 name = "rembo"
@@ -21,13 +22,17 @@ repo = "rembo"
 dir = "rembo"
 config_style = "makefile-template"
 
-# Links created inside this package's directory: rembo/fesm-utils -> fesm-utils
-# and rembo/chion -> chion at the orchestrator root, matching yelmo/chion.
+# Links created inside this package's directory: rembo/fesm-utils -> fesm-utils,
+# rembo/chion -> chion, rembo/insol -> insol at the orchestrator root, matching
+# yelmo/chion.
 [[package.links]]
 dep = "fesm-utils"
 
 [[package.links]]
 dep = "chion"
+
+[[package.links]]
+dep = "insol"
 
 [package.build]
 make_target = "rembo-static"
