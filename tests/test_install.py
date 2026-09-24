@@ -647,15 +647,15 @@ def test_run_install_skips_prompt_with_install_dir(tmp_path, monkeypatch):
 
 
 def test_node_for_prefers_orchestrator_then_package_for_dual_name():
-    # vilma is registered both ways. Bare resolution is the orchestrator;
+    # vilma2 is registered both ways. Bare resolution is the orchestrator;
     # prefer_package selects the component package form.
-    assert install._node_for("vilma").is_orchestrator
-    assert not install._node_for("vilma", prefer_package=True).is_orchestrator
+    assert install._node_for("vilma2").is_orchestrator
+    assert not install._node_for("vilma2", prefer_package=True).is_orchestrator
 
 
-def test_climberx_plan_includes_vilma_as_component_not_orchestrator():
+def test_climberx_plan_includes_vilma2_as_component_not_orchestrator():
     plan = install.build_plan("climber-x")
-    fe = next(n for n in plan.nodes if n.name == "vilma")
+    fe = next(n for n in plan.nodes if n.name == "vilma2")
     assert not fe.is_orchestrator and fe.clone   # own checkout, not a nested orch
     # coordinates was retired from climber-x.
     assert all(n.name != "coordinates" for n in plan.nodes)
@@ -663,21 +663,21 @@ def test_climberx_plan_includes_vilma_as_component_not_orchestrator():
 
 def test_plus_literal_resolves_dual_name_as_component():
     # The replan target the prompt builds: climber-x is the primary orchestrator,
-    # vilma rides along as a component package (not a nested orchestrator).
-    plan = install.build_plan("climber-x+vilma")
+    # vilma2 rides along as a component package (not a nested orchestrator).
+    plan = install.build_plan("climber-x+vilma2")
     assert plan.primary.name == "climber-x" and plan.primary.is_orchestrator
-    fe = next(n for n in plan.nodes if n.name == "vilma")
+    fe = next(n for n in plan.nodes if n.name == "vilma2")
     assert not fe.is_orchestrator
 
 
 def test_host_orchestrator_for_dual_name_inside_climberx(tmp_path):
     _write_manifest(tmp_path, "climber-x")
-    host = install._host_orchestrator_for("vilma", tmp_path)
+    host = install._host_orchestrator_for("vilma2", tmp_path)
     assert host is not None and host.name == "climber-x"
 
 
 def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypatch):
-    # Inside climber-x, `configme install vilma`: the target resolves as an
+    # Inside climber-x, `configme install vilma2`: the target resolves as an
     # orchestrator, but climber-x claims it as a component, so the prompt still
     # fires and (on yes) replans to climber-x+vilma.
     _write_manifest(tmp_path, "climber-x")
@@ -689,7 +689,7 @@ def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypat
 
     try:
         install.run_install(
-            "vilma", download="ssh", install_dir=None,
+            "vilma2", download="ssh", install_dir=None,
             machine="macbook", compiler="gfortran",
             overwrite=False, build_deps=False, dry_run=True, only=False,
             link_args=None, select_fn=None, ask_fn=None,
@@ -698,13 +698,13 @@ def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypat
     except Bail:
         pass
 
-    assert calls == ["vilma", "climber-x+vilma"]
-    assert asked and "climber-x" in asked[0] and "vilma" in asked[0]
+    assert calls == ["vilma2", "climber-x+vilma2"]
+    assert asked and "climber-x" in asked[0] and "vilma2" in asked[0]
 
 
 def test_run_install_preserves_cli_ref_through_host_replan(tmp_path, monkeypatch):
-    # `configme install vilma:myref` inside climber-x: the replan to
-    # climber-x+vilma must keep the CLI ref on the component slot.
+    # `configme install vilma2:myref` inside climber-x: the replan to
+    # climber-x+vilma2 must keep the CLI ref on the component slot.
     _write_manifest(tmp_path, "climber-x")
     monkeypatch.chdir(tmp_path)
     Bail = _stop_at_root_for(monkeypatch)
@@ -713,7 +713,7 @@ def test_run_install_preserves_cli_ref_through_host_replan(tmp_path, monkeypatch
 
     try:
         install.run_install(
-            "vilma:myref", download="ssh", install_dir=None,
+            "vilma2:myref", download="ssh", install_dir=None,
             machine="macbook", compiler="gfortran",
             overwrite=False, build_deps=False, dry_run=True, only=False,
             link_args=None, select_fn=None, ask_fn=None,
@@ -722,11 +722,11 @@ def test_run_install_preserves_cli_ref_through_host_replan(tmp_path, monkeypatch
     except Bail:
         pass
 
-    assert calls == ["vilma:myref", "climber-x+vilma:myref"]
+    assert calls == ["vilma2:myref", "climber-x+vilma2:myref"]
 
 
 def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):
-    # Declining keeps vilma-as-orchestrator: its own standalone install.
+    # Declining keeps vilma2-as-orchestrator: its own standalone install.
     _write_manifest(tmp_path, "climber-x")
     monkeypatch.chdir(tmp_path)
     Bail = _stop_at_root_for(monkeypatch)
@@ -735,7 +735,7 @@ def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):
 
     try:
         install.run_install(
-            "vilma", download="ssh", install_dir=None,
+            "vilma2", download="ssh", install_dir=None,
             machine="macbook", compiler="gfortran",
             overwrite=False, build_deps=False, dry_run=True, only=False,
             link_args=None, select_fn=None, ask_fn=None,
@@ -744,7 +744,7 @@ def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):
     except Bail:
         pass
 
-    assert calls == ["vilma"]
+    assert calls == ["vilma2"]
 
 
 # --------------------------------------------------- per-repo protocol override

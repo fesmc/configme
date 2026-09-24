@@ -8,6 +8,13 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.15.2
+
+### Changed
+
+- New VILMA (`fesmc/vilma`) registered as `vilma2` (installs into `vilma2/`),
+  pairing with the legacy `vilma1` to avoid ambiguity during the transition.
+
 ## 0.15.1
 
 ### Changed

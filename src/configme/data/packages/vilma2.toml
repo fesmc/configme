@@ -1,24 +1,24 @@
 # VILMA as a *component* package (fesmc/vilma).
 #
-# vilma is also a standalone orchestrator (orchestrators/vilma.toml).
+# vilma2 is also a standalone orchestrator (orchestrators/vilma2.toml).
 # This package definition is what lets it be installed *inside* another
 # orchestrator (climber-x) as a component, sharing that orchestrator's deps
 # instead of cloning its own. `_node_for(..., prefer_package=True)` selects this
-# form when vilma appears in an orchestrator's component set; the bare
-# `configme install vilma` still resolves the orchestrator.
+# form when vilma2 appears in an orchestrator's component set; the bare
+# `configme install vilma2` still resolves the orchestrator.
 #
 # As a component it shares the host orchestrator's fesm-utils (linked, not
 # re-cloned) — unlike the standalone orchestrator, which pins fesm-utils to
 # coords-dev for fe_remap's `coords` module.
 #
-# Formerly FastEarth3D. Not to be confused with the legacy VILMA (cxesmc/vilma),
-# registered as `vilma1` (packages/vilma1.toml).
+# Formerly FastEarth3D. Registered as `vilma2` to distinguish it from the legacy
+# VILMA (cxesmc/vilma), registered as `vilma1` (packages/vilma1.toml).
 
 [package]
-name = "vilma"
+name = "vilma2"
 org = "fesmc"
 repo = "vilma"
-dir = "vilma"
+dir = "vilma2"
 config_style = "makefile-template"
 
 [[package.links]]

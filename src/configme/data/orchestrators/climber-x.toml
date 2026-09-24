@@ -2,7 +2,7 @@
 #
 # Layout: like every other orchestrator, configme clones climber-x's external
 # component repos directly at the climber-x root (fesm-utils/, yelmo/,
-# vilma/). This matches the modern config/common.mk shipped on the
+# vilma2/). This matches the modern config/common.mk shipped on the
 # climber-x side; the legacy flat config/<machine>_<compiler> files have been
 # updated to the same root paths so `config.py` and `configme` agree.
 #
@@ -24,7 +24,7 @@ config_style = "makefile-template"
 # Managed components configme clones/configures/links, in build order. Each is
 # cloned at the climber-x root (its default package dir); `yelmo:climber-x`
 # pins the yelmo `climber-x` branch.
-default_packages = ["fesm-utils", "yelmo:climber-x", "vilma"]
+default_packages = ["fesm-utils", "yelmo:climber-x", "vilma2"]
 
 # Optional components (private repos): attempted on install, but a clone failure
 # (no access) is a soft skip recorded as "unavailable" — never a hard failure.
