@@ -209,7 +209,7 @@ class Package:
     #   "required" — cloned on install; a clone failure is a hard error (default)
     #   "optional" — attempted, but a clone failure (e.g. no access to a private
     #                repo) is a soft skip recorded as "unavailable", never fatal
-    #                — climber-x's bgc/vilma.
+    #                — climber-x's bgc/vilma1.
     #   "prompt"   — not cloned by default; install asks first (default no) and a
     #                decline is deferred — for large/expensive repos such as
     #                climber-x's `input` data on GitLab.
@@ -218,7 +218,7 @@ class Package:
     # (e.g. bgc carries the M4AGO submodule).
     submodules: bool = False
     # Per-machine git refs, for a package whose correct checkout depends on the
-    # host it is built on (e.g. climber-x's vilma ships precompiled, per-HPC
+    # host it is built on (e.g. climber-x's vilma1 ships precompiled, per-HPC
     # libraries — main only works on pik_hpc2024, other clusters need their own
     # branch). Maps a machine name (as auto-detected / selected) to the branch to
     # check out, with an optional ``"*"`` wildcard as the fallback for an
@@ -274,7 +274,7 @@ class Orchestrator:
     # works unchanged.
     default_packages: List[str] = field(default_factory=list)
     # Optional components attempted on install but allowed to fail softly (e.g.
-    # private repos a given user may not have access to: climber-x's bgc/vilma).
+    # private repos a given user may not have access to: climber-x's bgc/vilma1).
     # Same ``name:ref`` syntax as default_packages.
     optional_packages: List[str] = field(default_factory=list)
     # Auxiliary/data repos (e.g. climber-x's `input` data on GitLab): clone-only

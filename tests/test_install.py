@@ -429,34 +429,34 @@ def test_apply_manifest_refs_recursive_walks_every_level(tmp_path):
 
 # ---------------------------------------------------- machine-dependent refs
 
-def test_build_plan_pins_vilma_to_machine_sentinel():
-    # climber-x pins vilma -> @machine so its per-HPC branch is resolved later.
+def test_build_plan_pins_vilma1_to_machine_sentinel():
+    # climber-x pins vilma1 -> @machine so its per-HPC branch is resolved later.
     plan = install.build_plan("climber-x")
-    vilma = next(n for n in plan.nodes if n.name == "vilma")
-    assert vilma.ref == install.MACHINE_REF_SENTINEL
+    v1 = next(n for n in plan.nodes if n.name == "vilma1")
+    assert v1.ref == install.MACHINE_REF_SENTINEL
 
 
 def test_machine_refs_recognized_machine_selects_its_branch():
     plan = install.build_plan("climber-x")
-    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    v1 = next(n for n in plan.nodes if n.name == "vilma1")
     install._apply_machine_refs(plan.nodes, "dkrz_levante")
-    assert vilma.ref == "dkrz_levante"
+    assert v1.ref == "dkrz_levante"
 
 
 def test_machine_refs_pik_maps_to_main():
     # main carries pik's prebuilt libraries: a recognized machine mapping to main
     # is resolved explicitly (no ambiguity with "unset").
     plan = install.build_plan("climber-x")
-    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    v1 = next(n for n in plan.nodes if n.name == "vilma1")
     install._apply_machine_refs(plan.nodes, "pik_hpc2024")
-    assert vilma.ref == "main"
+    assert v1.ref == "main"
 
 
 def test_machine_refs_unrecognized_machine_falls_to_repo_default_and_warns(capsys):
     plan = install.build_plan("climber-x")
-    vilma = next(n for n in plan.nodes if n.name == "vilma")
+    v1 = next(n for n in plan.nodes if n.name == "vilma1")
     install._apply_machine_refs(plan.nodes, "some_laptop")
-    assert vilma.ref is None  # no "*" fallback -> repo default branch
+    assert v1.ref is None  # no "*" fallback -> repo default branch
     out = capsys.readouterr().out
     assert "per-HPC" in out and "some_laptop" in out
 
@@ -464,14 +464,14 @@ def test_machine_refs_unrecognized_machine_falls_to_repo_default_and_warns(capsy
 def test_machine_refs_explicit_pin_wins_over_machine_map(tmp_path):
     # A manifest pin overrides @machine (the node no longer carries the sentinel);
     # the pass leaves the pin and notes a machine branch exists.
-    _write_manifest_deps(tmp_path, "climber-x", ["vilma:my-branch"])
+    _write_manifest_deps(tmp_path, "climber-x", ["vilma1:my-branch"])
     project = context.find_project(tmp_path)
     plan = install.build_plan("climber-x")
     install._apply_manifest_refs(plan.nodes, project)
-    vilma = next(n for n in plan.nodes if n.name == "vilma")
-    assert vilma.ref == "my-branch"
+    v1 = next(n for n in plan.nodes if n.name == "vilma1")
+    assert v1.ref == "my-branch"
     install._apply_machine_refs(plan.nodes, "dkrz_levante")
-    assert vilma.ref == "my-branch"  # untouched
+    assert v1.ref == "my-branch"  # untouched
 
 
 def test_host_orchestrator_for_returns_orch_when_target_is_component(tmp_path):
@@ -481,10 +481,10 @@ def test_host_orchestrator_for_returns_orch_when_target_is_component(tmp_path):
 
 
 def test_host_orchestrator_for_returns_orch_for_optional_component(tmp_path):
-    # climber-x's bgc/vilma are optional_packages — still components of the
+    # climber-x's bgc/vilma1 are optional_packages — still components of the
     # orchestrator, so the prompt path should still trigger.
     _write_manifest(tmp_path, "climber-x")
-    host = install._host_orchestrator_for("vilma", tmp_path)
+    host = install._host_orchestrator_for("vilma1", tmp_path)
     assert host is not None and host.name == "climber-x"
 
 
@@ -647,15 +647,15 @@ def test_run_install_skips_prompt_with_install_dir(tmp_path, monkeypatch):
 
 
 def test_node_for_prefers_orchestrator_then_package_for_dual_name():
-    # FastEarth3D is registered both ways. Bare resolution is the orchestrator;
+    # vilma is registered both ways. Bare resolution is the orchestrator;
     # prefer_package selects the component package form.
-    assert install._node_for("FastEarth3D").is_orchestrator
-    assert not install._node_for("FastEarth3D", prefer_package=True).is_orchestrator
+    assert install._node_for("vilma").is_orchestrator
+    assert not install._node_for("vilma", prefer_package=True).is_orchestrator
 
 
-def test_climberx_plan_includes_fastearth3d_as_component_not_orchestrator():
+def test_climberx_plan_includes_vilma_as_component_not_orchestrator():
     plan = install.build_plan("climber-x")
-    fe = next(n for n in plan.nodes if n.name == "FastEarth3D")
+    fe = next(n for n in plan.nodes if n.name == "vilma")
     assert not fe.is_orchestrator and fe.clone   # own checkout, not a nested orch
     # coordinates was retired from climber-x.
     assert all(n.name != "coordinates" for n in plan.nodes)
@@ -663,23 +663,23 @@ def test_climberx_plan_includes_fastearth3d_as_component_not_orchestrator():
 
 def test_plus_literal_resolves_dual_name_as_component():
     # The replan target the prompt builds: climber-x is the primary orchestrator,
-    # FastEarth3D rides along as a component package (not a nested orchestrator).
-    plan = install.build_plan("climber-x+FastEarth3D")
+    # vilma rides along as a component package (not a nested orchestrator).
+    plan = install.build_plan("climber-x+vilma")
     assert plan.primary.name == "climber-x" and plan.primary.is_orchestrator
-    fe = next(n for n in plan.nodes if n.name == "FastEarth3D")
+    fe = next(n for n in plan.nodes if n.name == "vilma")
     assert not fe.is_orchestrator
 
 
 def test_host_orchestrator_for_dual_name_inside_climberx(tmp_path):
     _write_manifest(tmp_path, "climber-x")
-    host = install._host_orchestrator_for("FastEarth3D", tmp_path)
+    host = install._host_orchestrator_for("vilma", tmp_path)
     assert host is not None and host.name == "climber-x"
 
 
 def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypatch):
-    # Inside climber-x, `configme install FastEarth3D`: the target resolves as an
+    # Inside climber-x, `configme install vilma`: the target resolves as an
     # orchestrator, but climber-x claims it as a component, so the prompt still
-    # fires and (on yes) replans to climber-x+FastEarth3D.
+    # fires and (on yes) replans to climber-x+vilma.
     _write_manifest(tmp_path, "climber-x")
     monkeypatch.chdir(tmp_path)
     Bail = _stop_at_root_for(monkeypatch)
@@ -689,7 +689,7 @@ def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypat
 
     try:
         install.run_install(
-            "FastEarth3D", download="ssh", install_dir=None,
+            "vilma", download="ssh", install_dir=None,
             machine="macbook", compiler="gfortran",
             overwrite=False, build_deps=False, dry_run=True, only=False,
             link_args=None, select_fn=None, ask_fn=None,
@@ -698,13 +698,13 @@ def test_run_install_prompts_for_dual_orchestrator_component(tmp_path, monkeypat
     except Bail:
         pass
 
-    assert calls == ["FastEarth3D", "climber-x+FastEarth3D"]
-    assert asked and "climber-x" in asked[0] and "FastEarth3D" in asked[0]
+    assert calls == ["vilma", "climber-x+vilma"]
+    assert asked and "climber-x" in asked[0] and "vilma" in asked[0]
 
 
 def test_run_install_preserves_cli_ref_through_host_replan(tmp_path, monkeypatch):
-    # `configme install FastEarth3D:myref` inside climber-x: the replan to
-    # climber-x+FastEarth3D must keep the CLI ref on the component slot.
+    # `configme install vilma:myref` inside climber-x: the replan to
+    # climber-x+vilma must keep the CLI ref on the component slot.
     _write_manifest(tmp_path, "climber-x")
     monkeypatch.chdir(tmp_path)
     Bail = _stop_at_root_for(monkeypatch)
@@ -713,7 +713,7 @@ def test_run_install_preserves_cli_ref_through_host_replan(tmp_path, monkeypatch
 
     try:
         install.run_install(
-            "FastEarth3D:myref", download="ssh", install_dir=None,
+            "vilma:myref", download="ssh", install_dir=None,
             machine="macbook", compiler="gfortran",
             overwrite=False, build_deps=False, dry_run=True, only=False,
             link_args=None, select_fn=None, ask_fn=None,
@@ -722,11 +722,11 @@ def test_run_install_preserves_cli_ref_through_host_replan(tmp_path, monkeypatch
     except Bail:
         pass
 
-    assert calls == ["FastEarth3D:myref", "climber-x+FastEarth3D:myref"]
+    assert calls == ["vilma:myref", "climber-x+vilma:myref"]
 
 
 def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):
-    # Declining keeps FastEarth3D-as-orchestrator: its own standalone install.
+    # Declining keeps vilma-as-orchestrator: its own standalone install.
     _write_manifest(tmp_path, "climber-x")
     monkeypatch.chdir(tmp_path)
     Bail = _stop_at_root_for(monkeypatch)
@@ -735,7 +735,7 @@ def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):
 
     try:
         install.run_install(
-            "FastEarth3D", download="ssh", install_dir=None,
+            "vilma", download="ssh", install_dir=None,
             machine="macbook", compiler="gfortran",
             overwrite=False, build_deps=False, dry_run=True, only=False,
             link_args=None, select_fn=None, ask_fn=None,
@@ -744,7 +744,7 @@ def test_run_install_dual_name_standalone_on_decline(tmp_path, monkeypatch):
     except Bail:
         pass
 
-    assert calls == ["FastEarth3D"]
+    assert calls == ["vilma"]
 
 
 # --------------------------------------------------- per-repo protocol override

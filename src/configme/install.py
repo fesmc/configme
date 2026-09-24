@@ -140,7 +140,7 @@ def _node_for(name: str, *, prefer_package: bool = False) -> Node:
     orchs = data.orchestrators()
     pkgs = data.packages()
     # A name can be registered as *both* an orchestrator and a component package
-    # (e.g. FastEarth3D — standalone orchestrator, yet also a climber-x
+    # (e.g. vilma — standalone orchestrator, yet also a climber-x
     # component). The bare target resolves to the orchestrator; ``prefer_package``
     # picks the package form for the component position (orchestrator expansion,
     # or the non-primary slots of a ``+``-literal).
@@ -315,7 +315,7 @@ def _apply_machine_refs(nodes: List[Node], machine: Optional[str]) -> None:
     """Resolve the ``@machine`` ref sentinel to a per-machine branch, and warn
     when a machine-dependent component lands somewhere without a known branch.
 
-    A package with per-host precompiled artifacts (e.g. climber-x's vilma) pins
+    A package with per-host precompiled artifacts (e.g. climber-x's vilma1) pins
     its ref to ``@machine`` (in the orchestrator's component list); this pass —
     run once the machine is resolved and after every manifest override — looks
     the machine up in the package's ``machine_refs`` map:
@@ -426,7 +426,7 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         names = [data.split_ref(s)[0] for s in specs]
         # The primary is the (first) orchestrator in the list; every other slot
         # resolves as a package so a dual-registered name (orchestrator + package,
-        # e.g. FastEarth3D) installs as a component, not a nested orchestrator.
+        # e.g. vilma) installs as a component, not a nested orchestrator.
         primary_name = next((n for n in names if n in orchs), names[0])
         nodes = [_node_for_spec(s, prefer_package=(nm != primary_name))
                  for s, nm in zip(specs, names)]
@@ -451,7 +451,7 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
         # components (resolve each component's own deps too), then orchestrator
         for comp in orch.default_packages:
             _resolve_deps(comp, pkgs, order)
-        # Optional components (e.g. private bgc/vilma): resolved after the
+        # Optional components (e.g. private bgc/vilma1): resolved after the
         # required set, deduped against it, and flagged so a clone failure is a
         # soft skip rather than a hard failure.
         opt_order: List[str] = []
@@ -459,7 +459,7 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
             _resolve_deps(comp, pkgs, opt_order)
         opt_only = [n for n in opt_order if n not in order]
         # Components resolve as packages: a dual-registered name (e.g.
-        # FastEarth3D, also a standalone orchestrator) clones as a component.
+        # vilma, also a standalone orchestrator) clones as a component.
         comp_nodes = [_node_for(n, prefer_package=True) for n in order]
         opt_names = set(orch.optional_packages)
         for n in opt_only:
@@ -880,7 +880,7 @@ def _order_nested_after_container(plan: "Plan") -> None:
     This stable topological pass enforces exactly that and leaves every
     unrelated pair in its original (dependency) order. It is a no-op for
     subpackages (already inserted right after their parent by
-    ``_with_subpackages``) and for components that nest in nobody (bgc/vilma sit
+    ``_with_subpackages``) and for components that nest in nobody (bgc/vilma1 sit
     in the primary's tree, which is cloned first and excluded here)."""
     root = Path("/")
     rel = {n.name: dest_of(n, plan, root) for n in plan.nodes}
@@ -966,7 +966,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     # provides. Skipped when the user has already been explicit about scope
     # (`--only`, `--dir`, or a `+`-literal target).
     # The target may itself be a standalone orchestrator that the host also
-    # manages as a component (e.g. FastEarth3D inside climber-x): the same prompt
+    # manages as a component (e.g. vilma inside climber-x): the same prompt
     # applies, so the gate does not exclude orchestrator primaries —
     # `_host_orchestrator_for` already returns None when the target *is* the host.
     if (not only and "+" not in target and install_dir is None
@@ -1250,7 +1250,7 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
             continue
         dest = dest_of(node, plan, root)
         if node.config_style == "none":
-            # Clone-only component (e.g. vilma, bgc): configme places it but does
+            # Clone-only component (e.g. vilma1, bgc): configme places it but does
             # not generate a Makefile for it (it is built by the orchestrator, or
             # ships a prebuilt library).
             runner.emit(f"# {node.name}: clone-only (configme does not configure it)")

@@ -129,7 +129,7 @@ orchestrator ref itself (the primary) has no manifest/orchestrator tier — its
 ref comes only from the CLI (`yelmox:dev`), else its repo default branch.
 
 **Machine-dependent refs (`@machine`).** A component whose *correct* checkout
-depends on the host it is built on — e.g. climber-x's `vilma`, which ships
+depends on the host it is built on — e.g. climber-x's `vilma1`, which ships
 precompiled, per-HPC libraries — pins the sentinel ref `@machine` instead of a
 concrete branch. The sentinel flows through the four tiers above like any other
 ref (a CLI/manifest pin still overrides it); if it survives to clone time,
@@ -138,13 +138,13 @@ configme resolves it against the package's shipped `machine_refs` map
 for:
 
 - **machine recognised** → its branch is checked out, with a notice naming the
-  per-HPC dependence (`vilma: selected 'dkrz_levante' branch for machine …`);
+  per-HPC dependence (`vilma1: selected 'dkrz_levante' branch for machine …`);
 - **machine unrecognised** → the map's optional `"*"` wildcard branch, else the
   repo default, is kept — with a **warning** that a machine-specific branch may
   need building by hand;
 - **explicit pin present** → a CLI/manifest `name:ref` has already displaced the
   sentinel, so it wins untouched; configme just notes that a machine branch
-  exists. This is the escape hatch for building a one-off vilma branch anywhere.
+  exists. This is the escape hatch for building a one-off vilma1 branch anywhere.
 
 Because a machine maps to its own branch explicitly (pik_hpc2024 → `main`),
 `main` stays an ordinary branch — nothing is overloaded to mean "unset". Adding
@@ -300,7 +300,7 @@ checkout, not of any run. It reconstructs the same `build_plan` and probes the
 disk, then reports per-component state across four categories:
 
 - **repo** — each cloned component is a real git checkout (`.git` present).
-  An intentionally-absent repo — an `optional` component (`bgc`/`vilma`) or a
+  An intentionally-absent repo — an `optional` component (`bgc`/`vilma1`) or a
   `prompt`/data repo not yet fetched (climber-x's `input`) — is `pending`, not
   `missing`.
 - **link** — each inter-component build symlink resolves (`ok` / `broken` for a
@@ -568,7 +568,7 @@ concerns:
     - `default_packages` — build components, dependency-resolved and ordered.
     - `optional_packages` — components *attempted* on install but allowed to
       fail softly (private repos a user may lack access to — climber-x's
-      `bgc`/`vilma`); a clone failure is recorded as "unavailable", not fatal,
+      `bgc`/`vilma1`); a clone failure is recorded as "unavailable", not fatal,
       and subsequent steps skip the absent checkout.
     - `data_packages` — clone-only **auxiliary/data repos** (e.g. climber-x's
       `input` data on GitLab) that sit *outside* the build graph: not
@@ -580,7 +580,7 @@ concerns:
   - Per-package flags of note:
     - `clone_policy` — how the repo's *absence* is treated: `required` (default;
       cloned on install, a clone failure is fatal), `optional` (attempted, a
-      clone failure is a soft "unavailable" — private repos like `bgc`/`vilma`),
+      clone failure is a soft "unavailable" — private repos like `bgc`/`vilma1`),
       or `prompt` (not cloned by default; install asks first, default **no**, a
       decline deferred — large/expensive repos like the GitLab `input` data).
       Legacy `optional = true` is accepted as an alias for
@@ -592,7 +592,7 @@ concerns:
       (e.g. bgc's M4AGO).
     - `config_style = "none"` — a clone-only repo configme places but does not
       configure or build (compiled by the orchestrator, ships a prebuilt
-      library, or is pure data — e.g. vilma, climber-x's input).
+      library, or is pure data — e.g. vilma1, climber-x's input).
 - Onboarding a new package or orchestrator is a **data edit** (a natural PR
   target); the CLI logic stays generic and small.
 

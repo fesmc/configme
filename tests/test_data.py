@@ -77,8 +77,8 @@ def test_package_without_machine_refs_is_empty():
     assert data.packages()["yelmo"].machine_refs == {}
 
 
-def test_vilma_declares_per_machine_branches():
-    mrefs = data.packages()["vilma"].machine_refs
+def test_vilma1_declares_per_machine_branches():
+    mrefs = data.packages()["vilma1"].machine_refs
     assert mrefs["dkrz_levante"] == "dkrz_levante"
     assert mrefs["pik_hpc2024"] == "main"
 
@@ -115,7 +115,7 @@ def test_clone_policy_rejects_conflicting_legacy_and_new():
 def test_shipped_packages_carry_expected_clone_policy():
     pkgs = data.packages()
     assert pkgs["yelmo"].clone_policy == "required"
-    assert pkgs["vilma"].clone_policy == "optional"
+    assert pkgs["vilma1"].clone_policy == "optional"
     assert pkgs["bgc"].clone_policy == "optional"
 
 

@@ -405,7 +405,7 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
     for node in plan.nodes:
         dest = install.dest_of(node, plan, root)
         if node.config_style == "none":
-            # Clone-only component (e.g. vilma/bgc): nothing to (re)generate.
+            # Clone-only component (e.g. vilma1/bgc): nothing to (re)generate.
             continue
         install.configure_makefile(
             label=node.name, pkg_name=node.name, dest=dest,

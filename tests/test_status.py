@@ -57,7 +57,7 @@ def test_present_repo_is_ok(tmp_path):
 
 
 def test_optional_repo_pending_not_missing():
-    # climber-x carries optional private components (bgc, vilma).
+    # climber-x carries optional private components (bgc, vilma1).
     plan = install.build_plan("climber-x")
     checks = status.inspect(plan, Path("/nonexistent-root-xyz"))
     repos = by_name(checks, "repo")

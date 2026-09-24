@@ -8,6 +8,15 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.15.1
+
+### Changed
+
+- `FastEarth3D` renamed to `vilma` (repo `fesmc/vilma`), both as orchestrator
+  and as climber-x component.
+- Legacy VILMA (`cxesmc/vilma`) renamed to `vilma1`; climber-x places it at
+  `src/vilma1`.
+
 ## 0.15.0
 
 ### Added
