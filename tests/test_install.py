@@ -358,17 +358,28 @@ def test_apply_manifest_refs_leaves_cli_pinned_node(tmp_path):
     # CLI ref is authoritative: the manifest pin must not override a CLI-pinned
     # node, but still governs a non-pinned one.
     _write_manifest_deps(tmp_path, "climber-x", ["yelmo:manifest-branch"])
-    project = context.find_project(tmp_path)
 
     plan = install.build_plan("climber-x+yelmo:cli-branch")
-    install._apply_manifest_refs(plan.nodes, project)
+    install._apply_manifest_refs(plan.nodes, tmp_path)
     yelmo = next(n for n in plan.nodes if n.name == "yelmo")
     assert yelmo.ref == "cli-branch"
 
     plan = install.build_plan("climber-x")
-    install._apply_manifest_refs(plan.nodes, project)
+    install._apply_manifest_refs(plan.nodes, tmp_path)
     yelmo = next(n for n in plan.nodes if n.name == "yelmo")
     assert yelmo.ref == "manifest-branch" and not yelmo.ref_pinned
+
+
+def test_apply_manifest_refs_standalone_package_primary(tmp_path):
+    # Issue #11: a standalone package primary (yelmo, not an orchestrator) pins
+    # its deps' refs in its own manifest; they must be applied to both root-level
+    # (fesm-utils) and nested (FastHydrology) deps.
+    _write_manifest_deps(tmp_path, "yelmo", ["fesm-utils:dev", "FastHydrology:dev"])
+    plan = install.build_plan("yelmo:dev")
+    install._apply_manifest_refs(plan.nodes, tmp_path)
+    refs = {n.name: n.ref for n in plan.nodes}
+    assert refs["fesm-utils"] == "dev" and refs["FastHydrology"] == "dev"
+    assert refs["yelmo"] == "dev"
 
 
 def test_nested_manifest_ref_pins_deep_dependency(tmp_path):
@@ -421,8 +432,7 @@ def test_apply_manifest_refs_recursive_walks_every_level(tmp_path):
     _write_manifest_deps(tmp_path, "climber-x", ["yelmo:top"])
     yelmo_dest = install.dest_of(yelmo, plan, tmp_path)
     _write_manifest_deps(yelmo_dest, "yelmo", ["FastHydrology:deep"])
-    project = context.find_project(tmp_path)
-    install._apply_manifest_refs_recursive(plan, tmp_path, project)
+    install._apply_manifest_refs_recursive(plan, tmp_path)
     assert yelmo.ref == "top"
     assert fh.ref == "deep"
 
@@ -465,9 +475,8 @@ def test_machine_refs_explicit_pin_wins_over_machine_map(tmp_path):
     # A manifest pin overrides @machine (the node no longer carries the sentinel);
     # the pass leaves the pin and notes a machine branch exists.
     _write_manifest_deps(tmp_path, "climber-x", ["vilma1:my-branch"])
-    project = context.find_project(tmp_path)
     plan = install.build_plan("climber-x")
-    install._apply_manifest_refs(plan.nodes, project)
+    install._apply_manifest_refs(plan.nodes, tmp_path)
     v1 = next(n for n in plan.nodes if n.name == "vilma1")
     assert v1.ref == "my-branch"
     install._apply_machine_refs(plan.nodes, "dkrz_levante")

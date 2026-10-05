@@ -229,20 +229,24 @@ def _apply_component_refs(nodes: List[Node],
             n.ref = ref
 
 
-def _apply_manifest_refs(nodes: List[Node], project) -> None:
-    """Override node refs with the checkout manifest's own pins (``name:ref`` in
-    ``deps``). The manifest is authoritative over the orchestrator default — a
-    package owner edits it to choose the ref to build — so it wins over the
-    default already on the node; bare manifest entries pin nothing and leave that
-    default in place. An explicit CLI ref (``ref_pinned``) outranks even the
-    manifest and is left untouched here.
+def _apply_manifest_refs(nodes: List[Node], root: Path) -> None:
+    """Override node refs with the primary checkout's own manifest pins
+    (``name:ref`` in ``deps`` of ``<root>/.configme/manifest.toml``). The
+    manifest is authoritative over the orchestrator default — a package owner
+    edits it to choose the ref to build — so it wins over the default already on
+    the node; bare manifest entries pin nothing and leave that default in place.
+    An explicit CLI ref (``ref_pinned``) outranks even the manifest and is left
+    untouched here.
 
-    Call this once ``project`` (and thus the on-disk manifest) is known: in
-    ``config``/``upgrade`` after ``find_project``, and in ``install`` only after
-    the primary is cloned (its committed manifest does not exist until then)."""
-    if project is None:
-        return
-    refs = context.manifest_refs(project)
+    The manifest belongs to the checkout, whatever its primary is: an
+    orchestrator (climber-x pins yelmo) or a standalone package (yelmo pins
+    fesm-utils/FastHydrology). It is therefore read from ``root`` directly, not
+    via an orchestrator ``Project``.
+
+    Call this once the manifest is on disk: in ``config``/``upgrade`` upfront,
+    and in ``install`` only after the primary is cloned (its committed manifest
+    does not exist until then). A root with no manifest is a no-op."""
+    refs = context.read_manifest_refs(root / ".configme" / "manifest.toml")
     if not refs:
         return
     for n in nodes:
@@ -290,7 +294,7 @@ def _apply_nested_manifest_refs(plan: "Plan", root: Path, container: Node) -> No
             n.ref = ref
 
 
-def _apply_manifest_refs_recursive(plan: "Plan", root: Path, project) -> None:
+def _apply_manifest_refs_recursive(plan: "Plan", root: Path) -> None:
     """Full manifest ref resolution for a fully on-disk checkout: the primary's
     manifest pins its root-level components, then every container's own manifest
     pins the deps nested inside it, down each level (``_apply_nested_manifest_refs``).
@@ -298,7 +302,7 @@ def _apply_manifest_refs_recursive(plan: "Plan", root: Path, project) -> None:
     Used by ``config``/``upgrade``, where all checkouts already exist. ``install``
     resolves the primary the same way but applies each container's nested pins
     inline as it clones them (a container is not on disk until then)."""
-    _apply_manifest_refs(plan.nodes, project)
+    _apply_manifest_refs(plan.nodes, root)
     for node in plan.nodes:
         _apply_nested_manifest_refs(plan, root, node)
 
@@ -480,7 +484,9 @@ def build_plan(target: str, *, only: bool = False) -> Plan:
     # single package: its deps (auto) then itself
     order: List[str] = []
     _resolve_deps(primary.name, pkgs, order)
-    nodes = [_node_for(n) for n in order]
+    # Reuse the primary node itself (not a fresh one) so its CLI ref pin is the
+    # same object the per-node passes (ref reconcile, clone) see.
+    nodes = [primary if n == primary.name else _node_for(n) for n in order]
     return _finalize_plan(primary, _with_subpackages(nodes), False, None)
 
 
@@ -1055,11 +1061,18 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
     # The primary is now on disk, so its committed `.configme/` (manifest,
     # config, fragments) can finally be read. Apply the manifest's component ref
     # pins (they override the orchestrator defaults already on the dep nodes,
-    # before those deps are cloned below), then resolve machine/compiler using
-    # the project tier the checkout provides. (On a fresh repo with no committed
-    # manifest this is a no-op and orchestrator/user tiers govern.)
+    # before those deps are cloned below) — for an orchestrator and a standalone
+    # package primary alike — then resolve machine/compiler using the project
+    # tier the checkout provides. (On a fresh repo with no committed manifest
+    # this is a no-op and orchestrator/user tiers govern.)
     project = context.find_project(root) if root.exists() else None
-    _apply_manifest_refs(plan.nodes, project)
+    _apply_manifest_refs(plan.nodes, root)
+    if dry_run and not (root / ".configme" / "manifest.toml").is_file():
+        # A dry run never clones, so the primary's committed manifest (and any
+        # dep ref pins in it) is not visible yet; the dep clones below show only
+        # CLI/orchestrator refs. Say so rather than imply the pins are ignored.
+        color.cprint(f"  note: {plan.primary.name}'s manifest ref pins are "
+                     f"applied after its clone (not visible in a dry run)")
 
     # --- selection (machine/compiler, + the runme hpc account) ---
     machine, compiler = context.resolve_selection(machine, compiler, project, select_fn)
@@ -1427,7 +1440,7 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
     # template lives inside the checkout — so the ref must be correct first, and
     # `git pull --ff-only` then advances the right branch. A clean mismatch is
     # confirmed (default yes); a dirty or declined checkout is left untouched.
-    _apply_manifest_refs_recursive(plan, root, project)
+    _apply_manifest_refs_recursive(plan, root)
     _apply_machine_refs(plan.nodes, machine)
     runner.emit("\n# --- ref reconcile ---")
     for node in plan.nodes:

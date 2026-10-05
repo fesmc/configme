@@ -133,7 +133,7 @@ def manifest_packages(project: Project) -> List[str]:
     if project.manifest_path.is_file():
         manifest = _load_toml(project.manifest_path)
         # Entries may carry a ``:ref`` pin (e.g. "yelmo:climber-x"); the bare
-        # name is the package, the ref is read separately (see manifest_refs).
+        # name is the package, the ref is read separately (see read_manifest_refs).
         names = [data.split_ref(d)[0] for d in manifest.get("deps", [])]
         source = str(project.manifest_path)
     else:
@@ -167,14 +167,6 @@ def read_manifest_refs(manifest_path: Path) -> Dict[str, str]:
         if ref:
             refs[name] = ref
     return refs
-
-
-def manifest_refs(project: Project) -> Dict[str, str]:
-    """Component git refs the project's own manifest pins (see
-    ``read_manifest_refs``). The manifest is the source of truth a package owner
-    can edit (including to point a component at a development branch); these pins
-    override the orchestrator's shipped defaults."""
-    return read_manifest_refs(project.manifest_path)
 
 
 # ----------------------------------------------------------- manifest authoring
