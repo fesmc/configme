@@ -8,6 +8,12 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.15.4
+
+### Changed
+
+- `vilma2` now clones from `fesmc/vilma2` (repo renamed from `fesmc/vilma`).
+
 ## 0.15.2
 
 ### Changed

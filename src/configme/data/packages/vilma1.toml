@@ -1,7 +1,7 @@
 # vilma1: legacy VILMA solid-earth model (used by climber-x's fully-coupled build).
 #
 # The original VILMA (cxesmc/vilma), superseded by the open-source `vilma2`
-# (fesmc/vilma, packages/vilma2.toml). Registered as `vilma1` so both can be
+# (fesmc/vilma2, packages/vilma2.toml). Registered as `vilma1` so both can be
 # installed side by side: climber-x places it at src/vilma1 (component_paths),
 # while the new vilma2 clones at the climber-x root.
 #

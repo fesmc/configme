@@ -1,4 +1,4 @@
-# vilma2: VILMA orchestrator (fesmc/vilma; formerly FastEarth3D). Registered as
+# vilma2: VILMA orchestrator (fesmc/vilma2; formerly FastEarth3D). Registered as
 # `vilma2` to distinguish it from the legacy `vilma1` (cxesmc/vilma).
 #
 # Open-source 3D solid-Earth model (viscoelastic + sea-level equation). Its
@@ -17,7 +17,7 @@
 [orchestrator]
 name = "vilma2"
 org = "fesmc"
-repo = "vilma"
+repo = "vilma2"
 dir = "vilma2"
 config_style = "makefile-template"
 

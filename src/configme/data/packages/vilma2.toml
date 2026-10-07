@@ -1,4 +1,4 @@
-# VILMA as a *component* package (fesmc/vilma).
+# VILMA as a *component* package (fesmc/vilma2).
 #
 # vilma2 is also a standalone orchestrator (orchestrators/vilma2.toml).
 # This package definition is what lets it be installed *inside* another
@@ -17,7 +17,7 @@
 [package]
 name = "vilma2"
 org = "fesmc"
-repo = "vilma"
+repo = "vilma2"
 dir = "vilma2"
 config_style = "makefile-template"
 
