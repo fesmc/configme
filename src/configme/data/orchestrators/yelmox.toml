@@ -1,4 +1,4 @@
-# yelmox orchestrator: couples yelmo + FastIsostasy (+ optional rembo1) and is
+# yelmox orchestrator: couples yelmo + FastIsostasy + chion (+ optional rembo1) and is
 # itself a buildable package with its own config/Makefile template.
 #
 # This is the shipped seed manifest. A cloned yelmox carrying its own
@@ -18,6 +18,7 @@ default_packages = [
     "FastIsostasy",
     "FastHydrology",
     "rembo1",
+    "chion",
 ]
 
 # FastHydrology is cloned inside yelmo's checkout (yelmo/FastHydrology), not at
