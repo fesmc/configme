@@ -31,7 +31,7 @@ default_packages = [
 [orchestrator.extras]
 pip_package = ["runme"]       # install the `runme` command if missing
 runme_config = true           # `runme config init` + patch .runme/config.toml
-data_link = ["ice_data", "isostasy_data"]   # link runtime data dirs
+data_link = ["ice_data", "fesmdata", "isostasy_data"]   # link runtime data dirs (fesmdata: $FESMDATA/products)
 
 # Components are cloned as sub-packages directly under the orchestrator dir
 # (yelmox/yelmo, yelmox/fesm-utils, ...), so the orchestrator references them

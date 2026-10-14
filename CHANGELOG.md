@@ -8,6 +8,12 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.15.6
+
+### Changed
+
+- `yelmox` `data_link` includes `fesmdata` (FesmData v2 products, `$FESMDATA/products`).
+
 ## 0.15.5
 
 ### Changed
