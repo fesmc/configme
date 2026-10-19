@@ -8,6 +8,14 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.15.7
+
+### Changed
+
+- `yelmox` default package set includes `insol` (yelmox links `libinsol.a`
+  instead of vendoring `libs/insol`); the `insol` package is no longer
+  described as standalone.
+
 ## 0.15.6
 
 ### Changed

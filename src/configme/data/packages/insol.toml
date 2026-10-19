@@ -4,11 +4,9 @@
 # and +1 Ma from the Laskar et al. (2004) orbital elements, plus a surface
 # irradiance decomposition (DNI/DHI) used for renewable energy applications.
 #
-# Standalone: it has no external library dependencies (no netCDF, no
-# fesm-utils) and builds with only a Fortran compiler. Not currently a
-# component of any orchestrator -- yelmox vendors the insolation source
-# directly under libs/insol -- so it is listed here to be cloned and configured
-# on its own (`configme install insol`).
+# It has no external library dependencies (no netCDF, no fesm-utils) and builds
+# with only a Fortran compiler. A yelmox component (yelmox/insol); rembo links it
+# too. Can also be installed on its own (`configme install insol`).
 
 [package]
 name = "insol"
