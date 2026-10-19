@@ -1,5 +1,5 @@
-# yelmox orchestrator: couples yelmo + FastIsostasy + chion (+ optional rembo1) and is
-# itself a buildable package with its own config/Makefile template.
+# yelmox orchestrator: couples yelmo + FastIsostasy + chion + insol (+ optional
+# rembo1) and is itself a buildable package with its own config/Makefile template.
 #
 # This is the shipped seed manifest. A cloned yelmox carrying its own
 # .configme/manifest.toml takes precedence (see docs/DESIGN.md sec. 3).
@@ -13,6 +13,7 @@ config_style = "makefile-template"
 
 # The full default set installed by `configme install yelmox`, in build order.
 default_packages = [
+    "insol",
     "fesm-utils",
     "yelmo",
     "FastIsostasy",
