@@ -31,14 +31,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-from configme import (__version__, color, context, cpu, data, extras, generate,
+from configme import (__version__, color, context, cpu, data, extras, fortdeps, generate,
                       install, netcdf, status)
 from configme import git as git_mod
 
 # Verbs handled by subparsers. With no verb, bare `configme [-m M] [-c C]`
 # configures the current orchestrator; name packages with `configme config`.
 VERBS = {"install", "update", "upgrade", "config", "show", "new", "netcdf",
-         "init", "list", "status", "git", "check"}
+         "init", "list", "status", "git", "check", "deps"}
 
 # Standalone tools `configme install <name>` shortcuts to a `pip install -U` of,
 # rather than treating as a managed model package (no clone/configure/link/
@@ -410,7 +410,8 @@ def cmd_config(target, machine, compiler, *, only: bool = False,
         install.configure_makefile(
             label=node.name, pkg_name=node.name, dest=dest,
             config_subdir=node.config_subdir,
-            is_orchestrator=node.is_orchestrator, **common_kw)
+            is_orchestrator=node.is_orchestrator,
+            fortran_deps=node.fortran_deps, **common_kw)
 
     print("\nThis run:")
     for key in ("configured", "skipped", "failed"):
@@ -432,6 +433,36 @@ def cmd_config_verb(args: argparse.Namespace) -> int:
     for that)."""
     return cmd_config(args.target, args.machine, args.compiler,
                       only=args.only, dry_run=args.dry_run)
+
+
+def _registered_deps_spec(pkg_dir: Path) -> "data.FortranDeps | None":
+    """The ``fortran_deps`` spec of the package or orchestrator rooted at
+    ``pkg_dir`` (by manifest, else by directory name), if it declares one."""
+    project = context.find_project(pkg_dir)
+    if project is not None:
+        return project.orchestrator.fortran_deps
+    name = context.find_package(pkg_dir)
+    return data.packages()[name].fortran_deps if name else None
+
+
+def cmd_deps(args: argparse.Namespace) -> int:
+    """`configme deps [dir]` — (re)generate a package's Fortran module
+    dependency rules. Defaults come from the package's registered
+    ``fortran_deps`` spec, else src/ -> config/deps.mk; flags override."""
+    pkg_dir = Path(args.dir).expanduser().resolve()
+    spec = _registered_deps_spec(pkg_dir) or data.FortranDeps(src=["src"])
+    src = args.src or spec.src
+    objdir = args.objdir or spec.objdir
+    out_rel = args.out or spec.out
+    out, deps = fortdeps.write_deps(pkg_dir, src, objdir=objdir, out=out_rel)
+    print(f"configme deps: {out}")
+    print(f"  {len(deps.units)} sources in {', '.join(src)}; "
+          f"{sum(1 for r in deps.rules.values() if r)} objects with dependencies")
+    if deps.alternatives:
+        print(f"  alternatives (set <module>_obj): {', '.join(sorted(deps.alternatives))}")
+    if deps.externals:
+        print(f"  external modules: {', '.join(sorted(deps.externals))}")
+    return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -754,6 +785,21 @@ def _build_parser() -> argparse.ArgumentParser:
                           "an orchestrator to its subpackages")
     p_config.add_argument("--dry-run", action="store_true")
     p_config.set_defaults(func=cmd_config_verb)
+
+    p_deps = sub.add_parser(
+        "deps", help="generate Fortran module dependency rules (config/deps.mk) "
+        "from a package's sources")
+    p_deps.add_argument("dir", nargs="?", default=".",
+                        help="package directory (default: current directory)")
+    p_deps.add_argument("--src", nargs="+", default=None,
+                        help="source directories, scanned recursively (default: the "
+                        "package's registered fortran_deps, else src)")
+    p_deps.add_argument("--objdir", default=None,
+                        help="object-dir prefix written into the rules "
+                        "(default: $(objdir))")
+    p_deps.add_argument("--out", default=None,
+                        help="output file, relative to dir (default: config/deps.mk)")
+    p_deps.set_defaults(func=cmd_deps)
 
     p_status = sub.add_parser(
         "status", help="read-only: report what is present and what is still "

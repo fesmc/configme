@@ -8,6 +8,20 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.16.0
+
+### Added
+
+- `configme deps`: generate Fortran module dependency rules (`config/deps.mk`)
+  from `module`/`submodule`/`use`/`include` statements, with `vpath`, the
+  library object list, and `$(<module>_obj)` selection for a module defined
+  in two files (backend + stub).
+- `[package.fortran_deps]` / `[orchestrator.fortran_deps]`: generate the
+  dependencies during `configme config`/`install`/`upgrade`; fails if the
+  template does not include the output file.
+- `kryos` orchestrator (fesm-utils, yelmo, FastIsostasy, FastHydrology, chion,
+  insol), with dependency generation from `src/`.
+
 ## 0.15.7
 
 ### Changed
