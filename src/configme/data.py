@@ -137,6 +137,32 @@ class BuildSpec:
         return self._VARIANT_FLAG[variant]
 
 
+@dataclass
+class FortranDeps:
+    """Opt-in generation of Fortran module dependencies at configure time (see
+    fortdeps.py). ``src`` are the source directories scanned recursively,
+    ``objdir`` is the object-dir prefix written into the rules (a make variable
+    by default), ``out`` the file the Makefile template includes."""
+
+    src: List[str]
+    objdir: str = "$(objdir)"
+    out: str = "config/deps.mk"
+
+    @classmethod
+    def from_dict(cls, d: dict, source: Path) -> "FortranDeps":
+        src = d.get("src")
+        if not isinstance(src, list) or not src or not all(isinstance(s, str) for s in src):
+            raise DataError(f"{source}: fortran_deps 'src' must be a non-empty "
+                            f"list of directory strings")
+        return cls(src=list(src), objdir=d.get("objdir", "$(objdir)"),
+                   out=d.get("out", "config/deps.mk"))
+
+
+def _parse_fortran_deps(table: dict, source: Path) -> "Optional[FortranDeps]":
+    raw = table.get("fortran_deps")
+    return FortranDeps.from_dict(raw, source) if raw is not None else None
+
+
 def _parse_artifacts(raw: dict, source: Path) -> Dict[str, List[str]]:
     """Validate and normalise a ``[package.artifacts]`` table: a mapping of
     variant name -> list of artifact paths (strings). Anything else is a data
@@ -226,6 +252,8 @@ class Package:
     # the ``@machine`` sentinel (see install.MACHINE_REF_SENTINEL); an explicit
     # CLI/manifest pin still wins. Empty for a package with no per-host variance.
     machine_refs: Dict[str, str] = field(default_factory=dict)
+    # Generate config/deps.mk from the Fortran sources at configure time.
+    fortran_deps: "Optional[FortranDeps]" = None
 
     @classmethod
     def from_file(cls, path: Path) -> "Package":
@@ -255,6 +283,7 @@ class Package:
                 clone_policy=_parse_clone_policy(pkg, path),
                 submodules=bool(pkg.get("submodules", False)),
                 machine_refs=_parse_machine_refs(pkg.get("machine_refs", {}), path),
+                fortran_deps=_parse_fortran_deps(pkg, path),
             )
         except KeyError as e:
             raise DataError(f"{path}: [package] missing required key {e}") from e
@@ -292,6 +321,8 @@ class Orchestrator:
     # to the orchestrator root (default is the package's own `dir`). e.g.
     # climber-x places yelmo at src/yelmo and fesm-utils at src/utils/fesm-utils.
     component_paths: Dict[str, str] = field(default_factory=dict)
+    # Generate config/deps.mk from the Fortran sources at configure time.
+    fortran_deps: "Optional[FortranDeps]" = None
 
     def path_of(self, package: "Package") -> str:
         return self.component_paths.get(package.name, package.dir)
@@ -335,6 +366,7 @@ class Orchestrator:
                 extras=dict(orch.get("extras", {})),
                 links=links,
                 component_paths=dict(orch.get("component_paths", {})),
+                fortran_deps=_parse_fortran_deps(orch, path),
             )
         except KeyError as e:
             raise DataError(

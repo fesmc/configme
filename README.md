@@ -18,6 +18,7 @@ configme                   # (re)configure the current directory (orchestrator o
 configme show macbook      # print a machine (or compiler) fragment to copy/edit
 configme new machine mybox # scaffold a new machine fragment from linux, to edit
 configme netcdf            # detect & print NC_FROOT / NC_CROOT
+configme deps              # generate Fortran module dependency rules (config/deps.mk)
 ```
 
 ## Install
@@ -294,6 +295,36 @@ automatically as part of `configme install yelmox` / `climber-x`; the standalone
 form is handy when you want to install or update `runme` on its own. Other
 `install` flags (`-m`/`-c`/`--dir`/`-d`/`--build-deps`) don't apply and are
 ignored. `configme list` shows the available tools under **Tools:**.
+
+### Fortran module dependencies (`configme deps`)
+
+A package can have its per-object dependency rules generated instead of
+writing them by hand. `configme deps` scans the source directories for
+`module`, `submodule`, `use` and `include` statements and writes make rules
+`$(objdir)/a.o: $(objdir)/b.o` to `config/deps.mk`:
+
+```bash
+configme deps                                  # current package: its registered src dirs, else src/
+configme deps kryos --src src --objdir '$(objdir)' --out config/deps.mk
+```
+
+The file also sets `vpath` for the source directories (one pattern rule
+`$(objdir)/%.o: %.f90` compiles everything) and `deps_objs`, the library
+objects. Modules not defined in the scanned sources (intrinsics, external
+libraries such as yelmo) get no rule. A module defined in two files, such as a
+backend and its same-interface stub, is used as `$(<module>_obj)`: the
+Makefile sets that variable to the selected object before the include, and
+the generated file stops with an error if it is unset.
+
+A package opts in to generation at configure time in its registry entry; the
+template must then `include config/deps.mk`, or `configme config` fails:
+
+```toml
+[orchestrator.fortran_deps]     # or [package.fortran_deps]
+src = ["src"]                   # scanned recursively
+# objdir = "$(objdir)"          # prefix written into the rules
+# out = "config/deps.mk"
+```
 
 ## For configme developers
 

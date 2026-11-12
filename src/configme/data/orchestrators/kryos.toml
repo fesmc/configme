@@ -1,0 +1,32 @@
+# kryos orchestrator: model-agnostic framework for ice sheets and glaciers on
+# regional domains with optional global components; successor to yelmox. Every
+# component backend (yelmo, FastIsostasy, chion, ...) is a library behind a
+# same-interface stub, switched in kryos' config/common.mk (yelmo=1, cism=0, ...).
+#
+# This is the shipped seed manifest. A cloned kryos carrying its own
+# .configme/manifest.toml takes precedence (see docs/DESIGN.md sec. 3).
+
+[orchestrator]
+name = "kryos"
+org = "fesmc"
+repo = "kryos"
+dir = "kryos"
+config_style = "makefile-template"
+
+# The default set installed by `configme install kryos`, in build order: the
+# backends on by default in kryos' common.mk. FastHydrology (with elsa, tracer)
+# is cloned inside yelmo's checkout via yelmo's `nest` links. cism, pism,
+# vilma2 and rembo1 become optional_packages when their adapters exist.
+default_packages = [
+    "insol",
+    "fesm-utils",
+    "yelmo",
+    "FastIsostasy",
+    "FastHydrology",
+    "chion",
+]
+
+# Module dependencies are generated from src/ into config/deps.mk at configure
+# time (kryos' config/Makefile includes it); no hand-written per-object rules.
+[orchestrator.fortran_deps]
+src = ["src"]

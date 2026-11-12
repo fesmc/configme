@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from configme import color, context, data, extras as extras_mod, generate, links as links_mod, netcdf
+from configme import color, context, data, extras as extras_mod, fortdeps, generate, links as links_mod, netcdf
 
 
 class InstallError(Exception):
@@ -68,6 +68,8 @@ class Node:
     # parent's dest (so its location follows the parent under any orchestrator).
     parent: Optional[str] = None
     subdir: str = ""
+    # Generate Fortran module dependencies at configure time (see fortdeps.py).
+    fortran_deps: "Optional[data.FortranDeps]" = None
 
 
 @dataclass
@@ -147,14 +149,15 @@ def _node_for(name: str, *, prefer_package: bool = False) -> Node:
     if name in orchs and not (prefer_package and name in pkgs):
         o = orchs[name]
         return Node(o.name, o.org, o.repo, o.dir, o.config_style, "", [], True,
-                    host=o.host)
+                    host=o.host, fortran_deps=o.fortran_deps)
     if name in pkgs:
         p = pkgs[name]
         return Node(p.name, p.org, p.repo, p.dir, p.config_style,
                     p.config_subdir, p.links, False,
                     clone=p.clone, subpackages=p.subpackages, build=p.build,
                     host=p.host, protocol=p.protocol,
-                    clone_policy=p.clone_policy, submodules=p.submodules)
+                    clone_policy=p.clone_policy, submodules=p.submodules,
+                    fortran_deps=p.fortran_deps)
     known = sorted(set(orchs) | set(pkgs))
     raise InstallError(f"unknown target '{name}'. Supported: {', '.join(known)}")
 
@@ -736,11 +739,12 @@ class Runner:
 
 def configure_makefile(*, label, pkg_name, dest, config_subdir, is_orchestrator,
                        machine, compiler, machine_path, compiler_path,
-                       dry_run, results) -> None:
+                       dry_run, results, fortran_deps=None) -> None:
     """Generate one Makefile (modern common.mk, overlay, or legacy fallback),
     printing progress and recording the outcome in `results`. `label` is the
     display name (e.g. 'yelmo' or 'fesm-utils/utils'); `pkg_name` keys overlay
-    lookup.
+    lookup. With a `fortran_deps` spec, the module dependencies (config/deps.mk)
+    are generated right after the Makefile.
 
     Shared by `configme install` and `configme config` — the single Makefile
     generation code path."""
@@ -760,20 +764,22 @@ def configure_makefile(*, label, pkg_name, dest, config_subdir, is_orchestrator,
             out = generate.generate_makefile(dest, machine, compiler,
                                              machine_path, compiler_path, config_subdir)
             color.cprint(f"  + configure {label}: {out}")
-            results["configured"].append(label)
         elif generate.legacy_flat_config(cfgroot, machine, compiler):
             out = generate.legacy_makefile(dest, machine, compiler, config_subdir)
             color.cprint(f"  + configure {label}: {out} (LEGACY flat config)")
-            results["configured"].append(label)
         elif is_orchestrator:
             out = generate.generate_makefile(dest, machine, compiler,
                                              machine_path, compiler_path, config_subdir)
             color.cprint(f"  + configure {label}: {out} (no common.mk)")
-            results["configured"].append(label)
         else:
             color.cprint(f"  - {label}: no common.mk and no legacy config "
                   f"'{machine}_{compiler}'; skipping")
             results["skipped"].append(label)
+            return
+        if fortran_deps is not None:
+            out, deps = fortdeps.configure_deps(cfgroot, fortran_deps)
+            color.cprint(f"  + deps {label}: {out} ({len(deps.units)} sources)")
+        results["configured"].append(label)
     except (generate.GenerateError, netcdf.NetcdfError) as e:
         color.cprint(f"  ! {label}: {e}")
         results["failed"].append(label)
@@ -1274,7 +1280,8 @@ def run_install(target: str, *, download: str, install_dir: Optional[str],
                     f"-m {machine} -c {compiler})")
         configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
                             config_subdir=node.config_subdir,
-                            is_orchestrator=node.is_orchestrator, **common_kw)
+                            is_orchestrator=node.is_orchestrator,
+                            fortran_deps=node.fortran_deps, **common_kw)
         # A package configme owns the build of (e.g. fesm-utils) is compiled
         # here, after its Makefile exists, via its [package.build] make target.
         if node.build is not None:
@@ -1551,7 +1558,8 @@ def run_upgrade(target: str, *, install_dir: Optional[str],
                     f"-m {machine} -c {compiler})")
         configure_makefile(label=node.name, pkg_name=node.name, dest=dest,
                             config_subdir=node.config_subdir,
-                            is_orchestrator=node.is_orchestrator, **common_kw)
+                            is_orchestrator=node.is_orchestrator,
+                            fortran_deps=node.fortran_deps, **common_kw)
         if node.build is not None:
             if was_updated:
                 _build_make_package(runner, node, dest, build_deps,
