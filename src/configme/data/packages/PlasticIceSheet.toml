@@ -1,0 +1,24 @@
+# PlasticIceSheet: perfectly-plastic, steady-state ice-sheet reconstruction (libplastic, Fortran; port of
+# PlasticIceSheet.jl). A kryos ice backend (plastic=1).
+#
+# The library has no dependencies. fesm-utils is linked for the optional Lis of the steady SMB-driven solve
+# (make static lis=1) and for the comparison driver (make compare: ncio, netCDF); in a host (kryos) it is the
+# host's fesm-utils.
+
+[package]
+name = "PlasticIceSheet"
+org = "fesmc"
+repo = "PlasticIceSheet"
+dir = "PlasticIceSheet"
+config_style = "makefile-template"
+
+[[package.links]]
+dep = "fesm-utils"
+
+[package.build]
+make_target = "static"
+variants = ["serial", "omp"]
+
+[package.artifacts]
+serial = ["libplastic/include/libplastic.a"]
+omp = ["libplastic/include/libplastic.a"]
