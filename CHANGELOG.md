@@ -8,6 +8,14 @@ The project follows [semantic versioning](https://semver.org) loosely: minor
 for new capability, patch for fixes and refinements. Functionality changes are
 expected to come with a version bump.
 
+## 0.16.1
+
+### Changed
+
+- `kryos` orchestrator: vilma2 and PlasticIceSheet join the default set, so
+  `configme install kryos` clones and configures every backend with an
+  adapter (the manifest pins their refs; before, they were cloned by hand).
+
 ## 0.16.0
 
 ### Added
