@@ -148,6 +148,6 @@ def test_kryos_registered_with_fortran_deps():
     orch = data.orchestrators()["kryos"]
     assert orch.fortran_deps is not None and orch.fortran_deps.src == ["src"]
     assert orch.fortran_deps.out == "config/deps.mk"
-    for dep in ("fesm-utils", "yelmo", "FastIsostasy", "chion", "insol"):
+    for dep in ("fesm-utils", "yelmo", "FastIsostasy", "chion", "insol", "vilma2", "PlasticIceSheet"):
         assert dep in orch.default_packages
     assert install.build_plan("kryos").primary.fortran_deps == orch.fortran_deps

@@ -13,10 +13,14 @@ repo = "kryos"
 dir = "kryos"
 config_style = "makefile-template"
 
-# The default set installed by `configme install kryos`, in build order: the
-# backends on by default in kryos' common.mk. FastHydrology (with elsa, tracer)
-# is cloned inside yelmo's checkout via yelmo's `nest` links. cism, pism,
-# vilma2 and rembo1 become optional_packages when their adapters exist.
+# The default set installed by `configme install kryos`, in build order: every
+# backend with an adapter in kryos (the default-on ones of kryos' common.mk and
+# the geo backend vilma2 and ice backend PlasticIceSheet, vilma=1 and plastic=1),
+# so one install builds any switch combination. FastHydrology (with elsa,
+# tracer) is cloned inside yelmo's checkout via yelmo's `nest` links. kryos'
+# own `make kryos` builds the backend libraries (as yelmox does); configme
+# builds the packages with a [package.build] (fesm-utils, insol, chion,
+# PlasticIceSheet). cism, pism and rembo1 join when their adapters exist.
 default_packages = [
     "insol",
     "fesm-utils",
@@ -24,6 +28,8 @@ default_packages = [
     "FastIsostasy",
     "FastHydrology",
     "chion",
+    "vilma2",
+    "PlasticIceSheet",
 ]
 
 # Module dependencies are generated from src/ into config/deps.mk at configure
